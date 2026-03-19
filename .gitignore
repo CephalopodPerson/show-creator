@@ -1,0 +1,11 @@
+node_modules/
+client/node_modules/
+dist-electron/
+shows/
+*.qxw
+*.mp3
+*.wav
+*.flac
+*.aac
+.DS_Store
+Thumbs.db
