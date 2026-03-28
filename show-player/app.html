@@ -98,7 +98,7 @@ body { background: #0f0f13; color: #e0e0e0; font-family: 'Segoe UI', system-ui, 
     <span class="config-label">QLC+ host</span>
     <input class="config-input" id="qlcHost" placeholder="127.0.0.1" style="max-width:200px" />
   </div>
-  <div class="config-hint">VPS URL is where Show Creator is hosted. QLC+ host is the machine running QLC+ (usually 127.0.0.1).</div>
+  <div class="config-hint">VPS URL is where Show Creator is hosted. QLC+ host is where QLC+ is running (usually 127.0.0.1). Make sure QLC+ web server is enabled on port 9999 (Settings → Enable web interface).</div>
 </div>
 
 <div class="now-playing" id="nowPlaying">
@@ -123,9 +123,9 @@ body { background: #0f0f13; color: #e0e0e0; font-family: 'Segoe UI', system-ui, 
 
 <script>
 // ── State ─────────────────────────────────────────────────────────────────────
-const OSC_PORT  = 3848;
-let vpsUrl      = localStorage.getItem('vpsUrl')  || '';
-let qlcHost     = localStorage.getItem('qlcHost') || '127.0.0.1';
+const BRIDGE_PORT = 3848;
+let vpsUrl        = localStorage.getItem('vpsUrl')  || '';
+let qlcHost       = localStorage.getItem('qlcHost') || '127.0.0.1';
 let playing     = null;  // { seqId, funcId, duration }
 let timerHandle = null;
 let showData    = {};    // name → full show json
@@ -262,21 +262,21 @@ async function playSequence(showName, seqId) {
   const seq  = show?.sequences?.find(s => s.id === seqId);
   if (!seq) return;
 
-  // Trigger QLC+ via local OSC bridge
+  // Trigger QLC+ via local HTTP bridge
   try {
-    const r = await fetch(`http://127.0.0.1:${OSC_PORT}/osc`, {
+    const r = await fetch(`http://127.0.0.1:${BRIDGE_PORT}/qlc`, {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ host: qlcHost, port: 7700, functionId: seq.qlcFunctionId, action: 1 }),
+      body:    JSON.stringify({ host: qlcHost, port: 9999, functionId: seq.qlcFunctionId, action: 1 }),
     });
     if (!r.ok) {
       const err = await r.json().catch(() => ({}));
-      setStatus('⚠ OSC error: ' + (err.error ?? 'unknown') + ' — is QLC+ open with OSC input on port 7700?', 'warn');
+      setStatus('⚠ QLC+ error: ' + (err.error ?? 'unknown'), 'warn');
     } else {
       setStatus('▶ QLC+ sequence triggered', 'ok');
     }
   } catch (e) {
-    setStatus('⚠ OSC bridge not responding: ' + e.message, 'err');
+    setStatus('⚠ Bridge not responding: ' + e.message, 'err');
   }
 
   // Play audio from VPS
@@ -310,10 +310,10 @@ function stopPlayback(sendOsc) {
   audio.src = '';
 
   if (sendOsc && playing?.funcId) {
-    fetch(`http://127.0.0.1:${OSC_PORT}/osc`, {
+    fetch(`http://127.0.0.1:${BRIDGE_PORT}/qlc`, {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ host: qlcHost, port: 7700, functionId: playing.funcId, action: 0 }),
+      body:    JSON.stringify({ host: qlcHost, port: 9999, functionId: playing.funcId, action: 0 }),
     }).catch(() => {});
   }
 

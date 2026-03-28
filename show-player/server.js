@@ -1,7 +1,5 @@
-// Minimal local server — only purpose is sending OSC UDP packets to QLC+.
-// The browser cannot send UDP directly, so requests come here first.
+// Minimal local server — proxies QLC+ HTTP API calls to avoid CORS issues.
 const express = require('express');
-const dgram   = require('dgram');
 
 const app  = express();
 const PORT = 3848;
@@ -15,44 +13,24 @@ app.use((req, res, next) => {
   next();
 });
 
-// ── OSC helpers ───────────────────────────────────────────────────────────────
-function oscString(str) {
-  const nulled = str + '\0';
-  const padded = Math.ceil(nulled.length / 4) * 4;
-  const buf    = Buffer.alloc(padded, 0);
-  buf.write(nulled, 0, 'ascii');
-  return buf;
-}
-
-function sendOsc(host, port, functionId, action) {
-  return new Promise((resolve, reject) => {
-    const address  = `/qlcplus/function/${functionId}`;
-    const packet   = Buffer.concat([
-      oscString(address),
-      oscString(',f'),
-      (() => { const b = Buffer.allocUnsafe(4); b.writeFloatBE(parseFloat(action) || 0, 0); return b; })(),
-    ]);
-    const sock = dgram.createSocket('udp4');
-    sock.send(packet, 0, packet.length, port, host, err => {
-      sock.close();
-      if (err) reject(err); else resolve();
-    });
-  });
-}
-
-// POST /osc  { host?, port?, functionId, action }
-app.post('/osc', async (req, res) => {
-  const { host = '127.0.0.1', port = 7700, functionId, action = 1 } = req.body;
+// POST /qlc  { host?, port?, functionId, action }
+// Proxies to QLC+ built-in web API: GET /api/function?id=N&enable=1
+app.post('/qlc', async (req, res) => {
+  const { host = '127.0.0.1', port = 9999, functionId, action = 1 } = req.body;
   if (functionId == null) return res.status(400).json({ error: 'functionId required' });
+  const enable = action ? 1 : 0;
+  const url = `http://${host}:${port}/api/function?id=${functionId}&enable=${enable}`;
   try {
-    await sendOsc(host, parseInt(port), parseInt(functionId), action);
-    res.json({ ok: true });
+    const r    = await fetch(url);
+    const text = await r.text();
+    if (!r.ok) return res.status(502).json({ error: `QLC+ returned ${r.status}: ${text}` });
+    res.json({ ok: true, qlcResponse: text });
   } catch (e) {
-    console.error('OSC error:', e.message);
-    res.status(500).json({ error: e.message });
+    console.error('QLC+ HTTP error:', e.message);
+    res.status(500).json({ error: `Could not reach QLC+ at ${host}:${port} — is QLC+ running with web server enabled?` });
   }
 });
 
 app.listen(PORT, '127.0.0.1', () =>
-  console.log(`Show Player OSC bridge running on port ${PORT}`)
+  console.log(`Show Player QLC+ bridge running on port ${PORT}`)
 );
