@@ -18,11 +18,16 @@ jobs:
       - name: Install dependencies
         run: npm run install:all
 
-      - name: Build Windows installer
+      - name: Build Show Creator installer
         run: npm run build:win
+
+      - name: Build Show Player installer
+        run: npm run build:player:win
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: dist-electron/*.exe
+          files: |
+            dist-electron/*.exe
+            dist-player/*.exe
           generate_release_notes: true
