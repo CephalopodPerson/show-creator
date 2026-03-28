@@ -1,6 +1,8 @@
 node_modules/
 client/node_modules/
+show-player/node_modules/
 dist-electron/
+dist-player/
 shows/
 *.qxw
 *.mp3
