@@ -22,7 +22,7 @@ const TRACK_DEFS = [
   { key: 'memo', label: 'MEMO', tip: 'Operator notes',                                          h: MEMO_H  },
 ];
 
-export default function SequenceEditor({ sequence, showName, fixtures, onSave }) {
+export default function SequenceEditor({ sequence, showName, fixtures, onSave, mode = 'advanced' }) {
   const [steps,        setSteps]       = useState(sequence.steps ?? []);
   const [audioPath,    setAudioPath]   = useState(sequence.audioPath ?? null);
   const [audioDur,     setAudioDur]    = useState(sequence.audioDuration ?? 0);
@@ -274,6 +274,7 @@ export default function SequenceEditor({ sequence, showName, fixtures, onSave })
           step={selected}
           onChange={patch => updateStep(selected.id, patch)}
           onDelete={() => deleteStep(selected.id)}
+          mode={mode}
         />
       )}
     </div>

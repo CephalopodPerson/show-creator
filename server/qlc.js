@@ -248,7 +248,7 @@ function mergeAndWrite(sourceQxwPath, outputPath, sequences, fixtureRoles, showN
     // 3. Sequence function
     const seqId = nextId++;
     funcs.push(buildSequence(seqId, seq.name, boundId, dmxSteps, valuesCount));
-    vcSeqs.push({ name: seq.name, seqId });
+    vcSeqs.push({ name: seq.name, seqId, sequenceUuid: seq.id });
   }
 
   engine.Function = funcs;
@@ -287,7 +287,12 @@ function mergeAndWrite(sourceQxwPath, outputPath, sequences, fixtureRoles, showN
   const xml      = '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE Workspace>\n' + xmlBody;
 
   fs.writeFileSync(outputPath, xml, 'utf8');
-  return { success: true, functionsAdded: sequences.length * 2 };
+  // Build uuid → qlcFunctionId map so the caller can store it in show.json
+  const seqIdMap = {};
+  for (const { sequenceUuid, seqId } of vcSeqs) {
+    if (sequenceUuid) seqIdMap[sequenceUuid] = seqId;
+  }
+  return { success: true, functionsAdded: sequences.length * 2, seqIdMap };
 }
 
 module.exports = { parseQxw, extractFixtures, mergeAndWrite };

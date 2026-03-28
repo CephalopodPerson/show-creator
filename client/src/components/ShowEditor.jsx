@@ -3,7 +3,7 @@ import SequenceEditor from './SequenceEditor';
 
 const API = name => `/api/shows/${encodeURIComponent(name)}`;
 
-export default function ShowEditor({ showName }) {
+export default function ShowEditor({ showName, mode = 'advanced' }) {
   const [show,        setShow]        = useState(null);
   const [sequences,   setSequences]   = useState([]);
   const [active,      setActive]      = useState(null);
@@ -328,6 +328,7 @@ export default function ShowEditor({ showName }) {
               showName={showName}
               fixtures={show?.fixtures ?? []}
               onSave={saveSequence}
+              mode={mode}
             />
           : <div className="empty-state">
               {sequences.length === 0

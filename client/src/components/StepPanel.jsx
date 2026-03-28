@@ -153,8 +153,58 @@ function SpotControls({ spot, enabled, onToggle, onChange }) {
   );
 }
 
+// ── Basic mode presets ────────────────────────────────────────────────────────
+const PRESETS = [
+  { label: 'Red',        par: { r: 255, g: 0,   b: 0,   w: 0,   a: 0, uv: 0, strobe: 0, brightness: 100 }, spot: { r: 255, g: 0,   b: 0,   w: 0,   brightness: 100 } },
+  { label: 'Green',      par: { r: 0,   g: 220, b: 0,   w: 0,   a: 0, uv: 0, strobe: 0, brightness: 100 }, spot: { r: 0,   g: 220, b: 0,   w: 0,   brightness: 100 } },
+  { label: 'Blue',       par: { r: 0,   g: 60,  b: 255, w: 0,   a: 0, uv: 0, strobe: 0, brightness: 100 }, spot: { r: 0,   g: 60,  b: 255, w: 0,   brightness: 100 } },
+  { label: 'Warm White', par: { r: 255, g: 140, b: 20,  w: 255, a: 0, uv: 0, strobe: 0, brightness: 100 }, spot: { r: 255, g: 160, b: 80,  w: 200, brightness: 100 } },
+  { label: 'Purple',     par: { r: 180, g: 0,   b: 255, w: 0,   a: 0, uv: 0, strobe: 0, brightness: 100 }, spot: { r: 180, g: 0,   b: 255, w: 0,   brightness: 100 } },
+];
+const PRESET_COLORS = ['#ff2222', '#22dd22', '#3366ff', '#ffe0a0', '#aa22ff'];
+
+function PresetPicker({ step, onChange }) {
+  const currentPreset = step._preset ?? null;
+  const strobeOn = (step.par?.strobe ?? 0) > 0;
+
+  function applyPreset(idx) {
+    const p = PRESETS[idx];
+    onChange({
+      par:  { ...p.par,  strobe: strobeOn ? 200 : 0 },
+      spot: { ...p.spot },
+      _preset: idx,
+    });
+  }
+
+  function toggleStrobe() {
+    onChange({ par: { ...(step.par ?? {}), strobe: strobeOn ? 0 : 200 } });
+  }
+
+  return (
+    <div className="preset-picker">
+      <div className="preset-label">Colour preset</div>
+      <div className="preset-swatches">
+        {PRESETS.map((p, i) => (
+          <button
+            key={i}
+            className={`preset-swatch${currentPreset === i ? ' preset-swatch-active' : ''}`}
+            style={{ background: PRESET_COLORS[i] }}
+            onClick={() => applyPreset(i)}
+            title={p.label}
+          ><span className="preset-swatch-label">{p.label}</span></button>
+        ))}
+        <button
+          className={`preset-swatch preset-strobe${strobeOn ? ' preset-swatch-active' : ''}`}
+          onClick={toggleStrobe}
+          title="Strobe"
+        ><span className="preset-swatch-label">⚡ Strobe</span></button>
+      </div>
+    </div>
+  );
+}
+
 // ── Main StepPanel ─────────────────────────────────────────────────────────────
-export default function StepPanel({ step, onChange, onDelete }) {
+export default function StepPanel({ step, onChange, onDelete, mode = 'advanced' }) {
   const parEnabled  = step.parEnabled  !== false;   // default true
   const spotEnabled = step.spotEnabled !== false;   // default true
 
@@ -188,20 +238,24 @@ export default function StepPanel({ step, onChange, onDelete }) {
       </label>
 
       {/* Light controls */}
-      <div className="controls-grid">
-        <ParControls
-          par={step.par ?? defaultPar}
-          enabled={parEnabled}
-          onToggle={() => onChange({ parEnabled: !parEnabled })}
-          onChange={onChange}
-        />
-        <SpotControls
-          spot={step.spot ?? defaultSpot}
-          enabled={spotEnabled}
-          onToggle={() => onChange({ spotEnabled: !spotEnabled })}
-          onChange={onChange}
-        />
-      </div>
+      {mode === 'basic' ? (
+        <PresetPicker step={step} onChange={onChange} />
+      ) : (
+        <div className="controls-grid">
+          <ParControls
+            par={step.par ?? defaultPar}
+            enabled={parEnabled}
+            onToggle={() => onChange({ parEnabled: !parEnabled })}
+            onChange={onChange}
+          />
+          <SpotControls
+            spot={step.spot ?? defaultSpot}
+            enabled={spotEnabled}
+            onToggle={() => onChange({ spotEnabled: !spotEnabled })}
+            onChange={onChange}
+          />
+        </div>
+      )}
     </div>
   );
 }

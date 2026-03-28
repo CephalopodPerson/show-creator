@@ -3,6 +3,7 @@ const multer   = require('multer');
 const cors     = require('cors');
 const path     = require('path');
 const fs       = require('fs');
+const dgram    = require('dgram');
 const { v4: uuid } = require('uuid');
 const { parseQxw, extractFixtures, mergeAndWrite } = require('./qlc');
 
@@ -244,13 +245,71 @@ app.post('/api/shows/:showName/export', (req, res) => {
   }
 
   try {
-    mergeAndWrite(show.qxwPath, outPath, show.sequences ?? [], fixtureRoles, showName);
+    const result = mergeAndWrite(show.qxwPath, outPath, show.sequences ?? [], fixtureRoles, showName);
+    // Persist QLC+ function IDs back into show.json so the Player can trigger them via OSC
+    if (result.seqIdMap && Object.keys(result.seqIdMap).length > 0) {
+      const updated = loadShow(showName);
+      if (updated) {
+        updated.sequences = (updated.sequences ?? []).map(s => ({
+          ...s,
+          qlcFunctionId: result.seqIdMap[s.id] ?? s.qlcFunctionId,
+        }));
+        updated.updatedAt = new Date().toISOString();
+        saveShow(showName, updated);
+      }
+    }
     res.download(outPath, path.basename(outPath), err => {
       if (err) console.error('Export download error:', err);
     });
   } catch (e) {
     console.error('Export error:', e);
     res.status(500).json({ error: 'Export failed: ' + e.message });
+  }
+});
+
+// ── OSC trigger ──────────────────────────────────────────────────────────────
+// Sends a single OSC message to QLC+ to start or stop a sequence by function ID.
+// host defaults to localhost; port defaults to QLC+ default OSC input port 7700.
+// action: 1 = start, 0 = stop
+function sendOsc(host, port, functionId, action) {
+  return new Promise((resolve, reject) => {
+    // Build a minimal OSC bundle manually (no external library needed):
+    //   address: /qlcplus/function/N  (null-padded to 4-byte boundary)
+    //   type tag string: ,f           (float argument)
+    //   float value: 1.0 or 0.0
+    const address   = `/qlcplus/function/${functionId}`;
+    const addrBuf   = oscString(address);
+    const typeBuf   = oscString(',f');
+    const floatBuf  = Buffer.allocUnsafe(4);
+    floatBuf.writeFloatBE(parseFloat(action) || 0, 0);
+    const packet    = Buffer.concat([addrBuf, typeBuf, floatBuf]);
+
+    const sock = dgram.createSocket('udp4');
+    sock.send(packet, 0, packet.length, port, host, (err) => {
+      sock.close();
+      if (err) reject(err); else resolve();
+    });
+  });
+}
+
+function oscString(str) {
+  const nulled = str + '\0';
+  const padded = Math.ceil(nulled.length / 4) * 4;
+  const buf = Buffer.alloc(padded, 0);
+  buf.write(nulled, 0, 'ascii');
+  return buf;
+}
+
+// POST /api/osc  { host?, port?, functionId, action }
+app.post('/api/osc', async (req, res) => {
+  const { host = '127.0.0.1', port = 7700, functionId, action = 1 } = req.body;
+  if (functionId == null) return res.status(400).json({ error: 'functionId required' });
+  try {
+    await sendOsc(host, parseInt(port), parseInt(functionId), action);
+    res.json({ ok: true, host, port, functionId, action });
+  } catch (e) {
+    console.error('OSC send error:', e);
+    res.status(500).json({ error: 'OSC send failed: ' + e.message });
   }
 });
 
