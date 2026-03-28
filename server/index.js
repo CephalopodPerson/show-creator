@@ -313,6 +313,57 @@ app.post('/api/osc', async (req, res) => {
   }
 });
 
+// ── Storage ───────────────────────────────────────────────────────────────────
+function dirSize(dir) {
+  if (!fs.existsSync(dir)) return 0;
+  return fs.readdirSync(dir).reduce((total, f) => {
+    const full = path.join(dir, f);
+    try { return total + fs.statSync(full).size; } catch { return total; }
+  }, 0);
+}
+
+// GET /api/storage — total + per-show breakdown with file lists
+app.get('/api/storage', (req, res) => {
+  if (!fs.existsSync(SHOWS_DIR)) return res.json({ totalBytes: 0, shows: [] });
+  const shows = fs.readdirSync(SHOWS_DIR)
+    .filter(d => fs.statSync(path.join(SHOWS_DIR, d)).isDirectory())
+    .map(name => {
+      const uploadsDir = path.join(SHOWS_DIR, name, 'uploads');
+      const files = fs.existsSync(uploadsDir)
+        ? fs.readdirSync(uploadsDir).map(f => {
+            const full = path.join(uploadsDir, f);
+            try {
+              return { name: f, size: fs.statSync(full).size };
+            } catch { return null; }
+          }).filter(Boolean)
+        : [];
+      const showBytes = files.reduce((t, f) => t + f.size, 0);
+      return { name, bytes: showBytes, files };
+    });
+  const totalBytes = shows.reduce((t, s) => t + s.bytes, 0);
+  res.json({ totalBytes, shows });
+});
+
+// DELETE /api/shows/:showName/uploads/:filename — remove a single uploaded file
+app.delete('/api/shows/:showName/uploads/:filename', (req, res) => {
+  const { showName, filename } = req.params;
+  // Prevent path traversal
+  const safe = path.basename(filename);
+  const filePath = path.join(SHOWS_DIR, showName, 'uploads', safe);
+  if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'File not found' });
+  fs.unlinkSync(filePath);
+
+  // If it was the qxw for this show, clear qxwPath from show.json
+  const show = loadShow(showName);
+  if (show && show.qxwPath && path.basename(show.qxwPath) === safe) {
+    show.qxwPath  = null;
+    show.fixtures = [];
+    show.updatedAt = new Date().toISOString();
+    saveShow(showName, show);
+  }
+  res.json({ ok: true });
+});
+
 // ── Catch-all for React in production ────────────────────────────────────────
 if (process.env.NODE_ENV === 'production') {
   app.get('*', (req, res) => res.sendFile(path.join(CLIENT_DIST, 'index.html')));

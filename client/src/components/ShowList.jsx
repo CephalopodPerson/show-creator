@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react';
+import StorageManager from './StorageManager';
 
 export default function ShowList({ onOpen }) {
-  const [shows,      setShows]      = useState([]);
-  const [newName,    setNewName]    = useState('');
-  const [confirmDel, setConfirmDel] = useState(null); // show name awaiting confirm
+  const [shows,        setShows]        = useState([]);
+  const [newName,      setNewName]      = useState('');
+  const [confirmDel,   setConfirmDel]   = useState(null);
+  const [showStorage,  setShowStorage]  = useState(false);
 
   useEffect(() => {
     fetch('/api/shows').then(r => r.json()).then(setShows);
@@ -28,7 +30,12 @@ export default function ShowList({ onOpen }) {
 
   return (
     <div className="show-list">
-      <h2>Shows</h2>
+      <div className="show-list-title-row">
+        <h2>Shows</h2>
+        <button className="btn-secondary storage-btn" onClick={() => setShowStorage(true)}>
+          💾 Storage
+        </button>
+      </div>
 
       <div className="new-show-row">
         <input
@@ -67,6 +74,8 @@ export default function ShowList({ onOpen }) {
           <p className="muted">No shows yet — create one above.</p>
         )}
       </div>
+
+      {showStorage && <StorageManager onClose={() => setShowStorage(false)} />}
     </div>
   );
 }

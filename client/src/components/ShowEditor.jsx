@@ -11,13 +11,17 @@ export default function ShowEditor({ showName, mode = 'advanced' }) {
   const [exporting,   setExporting]   = useState(false);
   const [qxwFile,     setQxwFile]     = useState(null);
 
-  // Inline new-sequence form
-  const [addingSeq,   setAddingSeq]   = useState(false);
-  const [newSeqName,  setNewSeqName]  = useState('');
-  const newSeqInputRef = useRef(null);
-
   // Inline delete confirmation
   const [confirmId,   setConfirmId]   = useState(null);
+
+  // Inline rename
+  const [renamingId,  setRenamingId]  = useState(null);
+  const [renameVal,   setRenameVal]   = useState('');
+  const renameRef = useRef(null);
+
+  // Upload progress
+  const [uploading,   setUploading]   = useState(false);
+  const audioPickerRef = useRef(null);
 
   // Copy-to picker: id of sequence being copied, list of target shows
   const [copyingId,   setCopyingId]   = useState(null);
@@ -45,10 +49,10 @@ export default function ShowEditor({ showName, mode = 'advanced' }) {
       .catch(() => showToast('Failed to load show data'));
   }, [showName]);
 
-  // Auto-focus the new sequence input when it appears
+  // Auto-focus rename input
   useEffect(() => {
-    if (addingSeq) newSeqInputRef.current?.focus();
-  }, [addingSeq]);
+    if (renamingId) renameRef.current?.focus();
+  }, [renamingId]);
 
   // Auto-save a single sequence
   const saveSequence = useCallback(async (seq) => {
@@ -66,32 +70,80 @@ export default function ShowEditor({ showName, mode = 'advanced' }) {
     setSaving(false);
   }, [showName]);
 
-  // ── Add sequence ──────────────────────────────────────────────────────────
-  function startAddSequence() {
-    setNewSeqName(''); setAddingSeq(true); setConfirmId(null); setCopyingId(null);
+  // ── Add sequences from audio files ───────────────────────────────────────
+  function cleanFileName(filename) {
+    // Remove extension, strip leading track numbers like "01. " or "01 - "
+    return filename
+      .replace(/\.[^/.]+$/, '')
+      .replace(/^\d+[\s._-]+/, '')
+      .trim();
   }
 
-  async function commitAddSequence() {
-    const name = newSeqName.trim();
-    if (!name) { setAddingSeq(false); return; }
-    setAddingSeq(false);
-    try {
-      const res = await fetch(`${API(showName)}/sequences`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, steps: [] }),
-      });
-      const seq = await res.json();
-      setSequences(prev => [...prev, seq]);
-      setActive(seq.id);
-    } catch {
-      showToast('Failed to create sequence');
+  async function handleAudioFiles(files) {
+    if (!files?.length) return;
+    setUploading(true);
+    setConfirmId(null); setCopyingId(null);
+    let firstNewId = null;
+
+    for (const file of Array.from(files)) {
+      try {
+        // 1. Create the sequence with the cleaned filename
+        const name = cleanFileName(file.name);
+        const seqRes = await fetch(`${API(showName)}/sequences`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, steps: [] }),
+        });
+        const seq = await seqRes.json();
+        if (!firstNewId) firstNewId = seq.id;
+
+        // 2. Upload the audio file
+        const fd = new FormData();
+        fd.append('audio', file);
+        const audioRes  = await fetch(`${API(showName)}/audio`, { method: 'POST', body: fd });
+        const audioData = await audioRes.json();
+
+        // 3. Attach the audio path to the sequence
+        const updated = await fetch(`${API(showName)}/sequences/${seq.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...seq, audioPath: audioData.path }),
+        }).then(r => r.json());
+
+        setSequences(prev => [...prev, updated]);
+        if (audioData.warnings?.length) showToast(audioData.warnings[0], 'warn');
+      } catch {
+        showToast(`Failed to add ${file.name}`);
+      }
     }
+
+    if (firstNewId) setActive(firstNewId);
+    setUploading(false);
+    // Reset the file input so the same files can be re-selected if needed
+    if (audioPickerRef.current) audioPickerRef.current.value = '';
   }
 
-  function onNewSeqKey(e) {
-    if (e.key === 'Enter')  commitAddSequence();
-    if (e.key === 'Escape') setAddingSeq(false);
+  // ── Inline rename ─────────────────────────────────────────────────────────
+  function startRename(seq, e) {
+    e.stopPropagation();
+    setRenamingId(seq.id);
+    setRenameVal(seq.name);
+  }
+
+  async function commitRename(seq) {
+    const name = renameVal.trim();
+    setRenamingId(null);
+    if (!name || name === seq.name) return;
+    try {
+      const updated = await fetch(`${API(showName)}/sequences/${seq.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...seq, name }),
+      }).then(r => r.json());
+      setSequences(prev => prev.map(s => s.id === seq.id ? updated : s));
+    } catch {
+      showToast('Rename failed');
+    }
   }
 
   // ── Delete sequence ───────────────────────────────────────────────────────
@@ -206,24 +258,18 @@ export default function ShowEditor({ showName, mode = 'advanced' }) {
       <aside className="seq-list">
         <div className="seq-list-header">
           <span className="panel-title">Sequences</span>
-          <button className="btn-icon" title="Add sequence" onClick={startAddSequence}>＋</button>
-        </div>
-
-        {/* Inline new-sequence input */}
-        {addingSeq && (
-          <div className="seq-add-row">
+          <label className="btn-icon" title="Add sequences from audio files">
+            {uploading ? '…' : '＋'}
             <input
-              ref={newSeqInputRef}
-              className="seq-add-input"
-              value={newSeqName}
-              onChange={e => setNewSeqName(e.target.value)}
-              onKeyDown={onNewSeqKey}
-              placeholder="Sequence name…"
+              ref={audioPickerRef}
+              type="file"
+              accept="audio/*"
+              multiple
+              hidden
+              onChange={e => handleAudioFiles(e.target.files)}
             />
-            <button className="seq-add-ok"     onClick={commitAddSequence} title="Create">✓</button>
-            <button className="seq-add-cancel" onClick={() => setAddingSeq(false)} title="Cancel">✕</button>
-          </div>
-        )}
+          </label>
+        </div>
 
         {/* Sequence list */}
         {sequences.map((seq, idx) => (
@@ -232,7 +278,19 @@ export default function ShowEditor({ showName, mode = 'advanced' }) {
               className={`seq-item ${seq.id === active ? 'active' : ''}`}
               onClick={() => { setActive(seq.id); setConfirmId(null); setCopyingId(null); }}
             >
-              <span className="seq-item-name">{seq.name}</span>
+              {renamingId === seq.id ? (
+                <input
+                  ref={renameRef}
+                  className="seq-rename-input"
+                  value={renameVal}
+                  onChange={e => setRenameVal(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') commitRename(seq); if (e.key === 'Escape') setRenamingId(null); }}
+                  onBlur={() => commitRename(seq)}
+                  onClick={e => e.stopPropagation()}
+                />
+              ) : (
+                <span className="seq-item-name" onDoubleClick={e => startRename(seq, e)} title="Double-click to rename">{seq.name}</span>
+              )}
               <span className="seq-item-steps">{seq.steps?.length ?? 0}</span>
 
               {/* Reorder */}
@@ -279,8 +337,15 @@ export default function ShowEditor({ showName, mode = 'advanced' }) {
           </div>
         ))}
 
-        {sequences.length === 0 && !addingSeq && (
-          <p className="muted" style={{ padding: '12px' }}>No sequences yet</p>
+        {sequences.length === 0 && !uploading && (
+          <label className="seq-upload-prompt">
+            <span>＋ Add audio files</span>
+            <span className="seq-upload-sub">Click to upload MP3 / WAV<br/>Multiple files create multiple sequences</span>
+            <input type="file" accept="audio/*" multiple hidden onChange={e => handleAudioFiles(e.target.files)} />
+          </label>
+        )}
+        {uploading && (
+          <p className="muted" style={{ padding: '12px' }}>Uploading…</p>
         )}
 
         {/* QLC+ panel */}
