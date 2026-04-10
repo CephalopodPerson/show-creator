@@ -154,26 +154,54 @@ function SpotControls({ spot, enabled, onToggle, onChange }) {
 }
 
 // ── Basic mode presets ────────────────────────────────────────────────────────
+// Each preset stores base colour values at full brightness; brightness is applied on top.
 const PRESETS = [
-  { label: 'Red',        par: { r: 255, g: 0,   b: 0,   w: 0,   a: 0, uv: 0, strobe: 0, brightness: 100 }, spot: { r: 255, g: 0,   b: 0,   w: 0,   brightness: 100 } },
-  { label: 'Green',      par: { r: 0,   g: 220, b: 0,   w: 0,   a: 0, uv: 0, strobe: 0, brightness: 100 }, spot: { r: 0,   g: 220, b: 0,   w: 0,   brightness: 100 } },
-  { label: 'Blue',       par: { r: 0,   g: 60,  b: 255, w: 0,   a: 0, uv: 0, strobe: 0, brightness: 100 }, spot: { r: 0,   g: 60,  b: 255, w: 0,   brightness: 100 } },
-  { label: 'Warm White', par: { r: 255, g: 140, b: 20,  w: 255, a: 0, uv: 0, strobe: 0, brightness: 100 }, spot: { r: 255, g: 160, b: 80,  w: 200, brightness: 100 } },
-  { label: 'Purple',     par: { r: 180, g: 0,   b: 255, w: 0,   a: 0, uv: 0, strobe: 0, brightness: 100 }, spot: { r: 180, g: 0,   b: 255, w: 0,   brightness: 100 } },
+  { label: 'Red',        color: '#ff2222', par: { r: 255, g: 0,   b: 0,   w: 0,   a: 0,   uv: 0   }, spot: { r: 255, g: 0,   b: 0,   w: 0   } },
+  { label: 'Orange',     color: '#ff7700', par: { r: 255, g: 80,  b: 0,   w: 0,   a: 200, uv: 0   }, spot: { r: 255, g: 80,  b: 0,   w: 0   } },
+  { label: 'Yellow',     color: '#ffee00', par: { r: 255, g: 220, b: 0,   w: 0,   a: 100, uv: 0   }, spot: { r: 255, g: 220, b: 0,   w: 0   } },
+  { label: 'Green',      color: '#22dd22', par: { r: 0,   g: 220, b: 0,   w: 0,   a: 0,   uv: 0   }, spot: { r: 0,   g: 220, b: 0,   w: 0   } },
+  { label: 'Cyan',       color: '#00ccdd', par: { r: 0,   g: 200, b: 220, w: 0,   a: 0,   uv: 0   }, spot: { r: 0,   g: 200, b: 220, w: 0   } },
+  { label: 'Blue',       color: '#3366ff', par: { r: 0,   g: 60,  b: 255, w: 0,   a: 0,   uv: 0   }, spot: { r: 0,   g: 60,  b: 255, w: 0   } },
+  { label: 'Purple',     color: '#aa22ff', par: { r: 180, g: 0,   b: 255, w: 0,   a: 0,   uv: 0   }, spot: { r: 180, g: 0,   b: 255, w: 0   } },
+  { label: 'Pink',       color: '#ff44aa', par: { r: 255, g: 0,   b: 140, w: 0,   a: 0,   uv: 0   }, spot: { r: 255, g: 0,   b: 140, w: 0   } },
+  { label: 'Warm White', color: '#ffe0a0', par: { r: 255, g: 140, b: 20,  w: 255, a: 0,   uv: 0   }, spot: { r: 255, g: 160, b: 80,  w: 200 } },
+  { label: 'Cool White', color: '#cce8ff', par: { r: 180, g: 210, b: 255, w: 200, a: 0,   uv: 0   }, spot: { r: 180, g: 210, b: 255, w: 200 } },
+  { label: 'UV',         color: '#7700cc', par: { r: 0,   g: 0,   b: 0,   w: 0,   a: 0,   uv: 255 }, spot: { r: 40,  g: 0,   b: 100, w: 0   } },
 ];
-const PRESET_COLORS = ['#ff2222', '#22dd22', '#3366ff', '#ffe0a0', '#aa22ff'];
+
+// Scale a preset's colour values by a brightness factor (0–100) before applying
+function applyBrightnessScale(colours, brightness) {
+  const f = (brightness ?? 100) / 100;
+  const scaled = {};
+  for (const [k, v] of Object.entries(colours)) {
+    scaled[k] = typeof v === 'number' ? Math.round(v * f) : v;
+  }
+  return scaled;
+}
 
 function PresetPicker({ step, onChange }) {
   const currentPreset = step._preset ?? null;
-  const strobeOn = (step.par?.strobe ?? 0) > 0;
+  const strobeOn      = (step.par?.strobe ?? 0) > 0;
+  const brightness    = step._brightness ?? 100;
 
   function applyPreset(idx) {
     const p = PRESETS[idx];
-    onChange({
-      par:  { ...p.par,  strobe: strobeOn ? 200 : 0 },
-      spot: { ...p.spot },
-      _preset: idx,
-    });
+    const par  = { ...applyBrightnessScale(p.par,  brightness), strobe: strobeOn ? 200 : 0, brightness };
+    const spot = { ...applyBrightnessScale(p.spot, brightness), brightness };
+    onChange({ par, spot, _preset: idx, _brightness: brightness });
+  }
+
+  function changeBrightness(val) {
+    const newBright = parseInt(val);
+    // Re-apply current preset at new brightness if one is selected
+    if (currentPreset !== null) {
+      const p   = PRESETS[currentPreset];
+      const par  = { ...applyBrightnessScale(p.par,  newBright), strobe: strobeOn ? 200 : 0, brightness: newBright };
+      const spot = { ...applyBrightnessScale(p.spot, newBright), brightness: newBright };
+      onChange({ par, spot, _brightness: newBright });
+    } else {
+      onChange({ _brightness: newBright });
+    }
   }
 
   function toggleStrobe() {
@@ -182,13 +210,24 @@ function PresetPicker({ step, onChange }) {
 
   return (
     <div className="preset-picker">
-      <div className="preset-label">Colour preset</div>
+      <div className="preset-row-header">
+        <span className="preset-label">Colour preset</span>
+        <div className="preset-brightness">
+          <span className="preset-bright-label">☀ Brightness</span>
+          <input
+            type="range" min={5} max={100} value={brightness}
+            onChange={e => changeBrightness(e.target.value)}
+            className="preset-bright-slider"
+          />
+          <span className="preset-bright-val">{brightness}%</span>
+        </div>
+      </div>
       <div className="preset-swatches">
         {PRESETS.map((p, i) => (
           <button
             key={i}
             className={`preset-swatch${currentPreset === i ? ' preset-swatch-active' : ''}`}
-            style={{ background: PRESET_COLORS[i] }}
+            style={{ background: p.color }}
             onClick={() => applyPreset(i)}
             title={p.label}
           ><span className="preset-swatch-label">{p.label}</span></button>

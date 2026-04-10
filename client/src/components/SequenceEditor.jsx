@@ -33,6 +33,12 @@ export default function SequenceEditor({ sequence, showName, fixtures, onSave, m
   const [zoomIdx,      setZoomIdx]     = useState(0);    // index into ZOOM_STEPS
   const [containerW,   setContainerW]  = useState(0);   // scroll-area pixel width
 
+  // Audio analysis state
+  const [analyzing,    setAnalyzing]   = useState(false);
+  const [suggestions,  setSuggestions] = useState([]);   // array of { t, label }
+  const [selSugg,      setSelSugg]     = useState(new Set());
+  const [showAnalysis, setShowAnalysis] = useState(false);
+
   const saveTimer  = useRef(null);
   const scrollRef  = useRef(null);
   const wsRef      = useRef(null);
@@ -108,6 +114,110 @@ export default function SequenceEditor({ sequence, showName, fixtures, onSave, m
     setWarnings(data.warnings ?? []);
     setAudioPath(data.path);
     triggerSave(steps, data.path);
+  }
+
+  // ── Audio analysis: detect energy transitions and suggest splits ────────────
+  async function analyzeAudio() {
+    if (!audioPath || analyzing) return;
+    setAnalyzing(true);
+    setSuggestions([]);
+    try {
+      const res = await fetch(audioPath);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const arrayBuf = await res.arrayBuffer();
+
+      // Decode using OfflineAudioContext (mono downmix, full duration)
+      const tmpCtx  = new (window.AudioContext || window.webkitAudioContext)();
+      const decoded = await tmpCtx.decodeAudioData(arrayBuf);
+      tmpCtx.close();
+
+      const sr       = decoded.sampleRate;
+      const WINDOW_S = 0.5;                          // analysis window in seconds
+      const winSamp  = Math.round(WINDOW_S * sr);
+      const numWin   = Math.ceil(decoded.length / winSamp);
+
+      // Mix all channels to mono and compute RMS per window
+      const numCh = decoded.numberOfChannels;
+      const rms = [];
+      for (let i = 0; i < numWin; i++) {
+        const start = i * winSamp;
+        const end   = Math.min(start + winSamp, decoded.length);
+        let   sum   = 0;
+        for (let ch = 0; ch < numCh; ch++) {
+          const data = decoded.getChannelData(ch);
+          for (let j = start; j < end; j++) sum += data[j] * data[j];
+        }
+        rms.push(Math.sqrt(sum / ((end - start) * numCh)));
+      }
+
+      // Smooth with 5-point average
+      const smooth = rms.map((_, i) => {
+        const lo = Math.max(0, i - 2), hi = Math.min(rms.length - 1, i + 2);
+        const slice = rms.slice(lo, hi + 1);
+        return slice.reduce((a, b) => a + b, 0) / slice.length;
+      });
+
+      // Find windows where energy jumps significantly vs. preceding 2 seconds
+      const LOOK_BACK = Math.round(2 / WINDOW_S);   // windows in 2s
+      const LOOK_AHEAD = Math.round(0.5 / WINDOW_S);
+      const THRESHOLD  = 1.6;                        // 60% increase
+      const MIN_GAP_S  = 4;                          // min seconds between suggestions
+      const found = [];
+
+      for (let i = LOOK_BACK; i < smooth.length - LOOK_AHEAD; i++) {
+        const before = smooth.slice(i - LOOK_BACK, i).reduce((a, b) => a + b, 0) / LOOK_BACK;
+        const after  = smooth.slice(i, i + LOOK_AHEAD).reduce((a, b) => a + b, 0) / LOOK_AHEAD;
+        if (before > 0.0005 && after > before * THRESHOLD) {
+          const t = parseFloat((i * WINDOW_S).toFixed(1));
+          if (!found.find(f => Math.abs(f.t - t) < MIN_GAP_S)) {
+            found.push({ t, energy: after });
+          }
+        }
+      }
+
+      // Sort by time, label by strength
+      found.sort((a, b) => a.t - b.t);
+      const labeled = found.map(f => ({
+        t:     f.t,
+        label: f.energy > 0.05 ? 'Big drop' : f.energy > 0.02 ? 'Energy rise' : 'Transition',
+      }));
+
+      setSuggestions(labeled);
+      setSelSugg(new Set(labeled.map((_, i) => i)));  // pre-select all
+      setShowAnalysis(true);
+    } catch (err) {
+      console.error('Audio analysis failed:', err);
+      setWarnings(w => [...w, `Analysis failed: ${err.message}`]);
+    }
+    setAnalyzing(false);
+  }
+
+  // Apply selected suggestions as splits
+  function applySuggestions() {
+    let current = [...steps].sort((a, b) => a.time_s - b.time_s);
+    const times  = suggestions
+      .filter((_, i) => selSugg.has(i))
+      .map(s => s.t)
+      .sort((a, b) => a - b);
+
+    for (const t of times) {
+      const host = current.find(s => t > s.time_s + 0.1 && t < s.time_s + s.duration_s - 0.1);
+      if (host) {
+        const stepA = { ...host, duration_s: parseFloat((t - host.time_s).toFixed(2)) };
+        const stepB = {
+          ...host,
+          id:         crypto.randomUUID(),
+          time_s:     t,
+          duration_s: parseFloat((host.time_s + host.duration_s - t).toFixed(2)),
+          memo:       '',
+        };
+        current = current.map(s => s.id === host.id ? stepA : s);
+        current.push(stepB);
+        current.sort((a, b) => a.time_s - b.time_s);
+      }
+    }
+    updateSteps(current);
+    setShowAnalysis(false);
   }
 
   // ── Split the step under the playhead into two, or add in a gap ───────────
@@ -210,6 +320,16 @@ export default function SequenceEditor({ sequence, showName, fixtures, onSave, m
           {audioPath ? '🎵 Change audio' : '🎵 Upload audio'}
           <input type="file" accept="audio/*" hidden onChange={uploadAudio} />
         </label>
+        {audioPath && (
+          <button
+            className="btn-secondary"
+            onClick={analyzeAudio}
+            disabled={analyzing}
+            title="Analyse the song for energy changes and suggest where to split sequences"
+          >
+            {analyzing ? '⏳ Analysing…' : '✨ Analyse'}
+          </button>
+        )}
         <button className="btn-primary" onClick={splitAtCursor}>
           {splitLabel}
         </button>
@@ -276,6 +396,54 @@ export default function SequenceEditor({ sequence, showName, fixtures, onSave, m
           onDelete={() => deleteStep(selected.id)}
           mode={mode}
         />
+      )}
+
+      {/* ── Audio analysis suggestions modal ── */}
+      {showAnalysis && (
+        <div className="modal-overlay" onClick={() => setShowAnalysis(false)}>
+          <div className="modal-box analysis-modal" onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <span className="modal-title">✨ Suggested split points</span>
+              <button className="modal-close" onClick={() => setShowAnalysis(false)}>✕</button>
+            </div>
+
+            {suggestions.length === 0 ? (
+              <p className="analysis-empty">No significant energy changes detected — the song may be consistently energetic or quiet throughout.</p>
+            ) : (
+              <>
+                <p className="analysis-hint">Select the transitions you'd like to use as split points. Each creates a new step.</p>
+                <div className="analysis-list">
+                  {suggestions.map((s, i) => (
+                    <label key={i} className="analysis-item">
+                      <input
+                        type="checkbox"
+                        checked={selSugg.has(i)}
+                        onChange={() => {
+                          const next = new Set(selSugg);
+                          next.has(i) ? next.delete(i) : next.add(i);
+                          setSelSugg(next);
+                        }}
+                      />
+                      <span className="analysis-time">{formatTime(s.t)}</span>
+                      <span className="analysis-tag">{s.label}</span>
+                    </label>
+                  ))}
+                </div>
+                <div className="analysis-actions">
+                  <button className="btn-secondary" onClick={() => setSelSugg(new Set())}>None</button>
+                  <button className="btn-secondary" onClick={() => setSelSugg(new Set(suggestions.map((_, i) => i)))}>All</button>
+                  <button
+                    className="btn-primary"
+                    disabled={selSugg.size === 0}
+                    onClick={applySuggestions}
+                  >
+                    Apply {selSugg.size} split{selSugg.size !== 1 ? 's' : ''}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
       )}
     </div>
   );

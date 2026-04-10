@@ -399,6 +399,58 @@ body { background: #0f0f13; color: #e0e0e0; font-family: 'Segoe UI', system-ui, 
 .preset-strobe:hover { animation: strobe-anim 0.2s linear infinite; }
 @keyframes strobe-anim { 0%,100%{background-position:0%} 50%{background-position:100%} }
 
+/* Preset row header — label + brightness side-by-side */
+.preset-row-header {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 10px; gap: 16px; flex-wrap: wrap;
+}
+.preset-brightness {
+  display: flex; align-items: center; gap: 8px; flex: 1; min-width: 180px; max-width: 320px;
+}
+.preset-bright-label { font-size: 11px; color: #888; white-space: nowrap; }
+.preset-bright-slider { flex: 1; accent-color: #f5c518; cursor: pointer; }
+.preset-bright-val { font-size: 11px; color: #ccc; min-width: 32px; text-align: right; }
+
+/* ── Analysis modal ── */
+.modal-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.65);
+  display: flex; align-items: center; justify-content: center; z-index: 200;
+}
+.modal-box {
+  background: #16161e; border: 1px solid #2a2a3a; border-radius: 10px;
+  width: 480px; max-width: 95vw; max-height: 80vh;
+  display: flex; flex-direction: column; overflow: hidden;
+}
+.modal-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 18px; border-bottom: 1px solid #2a2a3a; flex-shrink: 0;
+}
+.modal-title { font-size: 15px; font-weight: 600; color: #e0e0e0; }
+.modal-close {
+  background: none; border: none; color: #666; font-size: 18px; cursor: pointer;
+  padding: 2px 6px; border-radius: 4px;
+}
+.modal-close:hover { color: #ccc; background: #2a2a3a; }
+.analysis-empty { padding: 24px 18px; color: #888; font-size: 13px; }
+.analysis-hint { padding: 12px 18px 4px; color: #888; font-size: 12px; }
+.analysis-list { overflow-y: auto; flex: 1; padding: 8px 18px; }
+.analysis-item {
+  display: flex; align-items: center; gap: 12px;
+  padding: 9px 0; border-bottom: 1px solid #1e1e28; cursor: pointer;
+  font-size: 13px;
+}
+.analysis-item:last-child { border-bottom: none; }
+.analysis-item input[type=checkbox] { accent-color: #4a9eff; cursor: pointer; }
+.analysis-time { font-family: monospace; color: #e0e0e0; min-width: 64px; }
+.analysis-tag {
+  color: #888; font-size: 11px;
+  background: #22223a; padding: 2px 8px; border-radius: 10px;
+}
+.analysis-actions {
+  display: flex; gap: 8px; justify-content: flex-end;
+  padding: 12px 18px; border-top: 1px solid #2a2a3a; flex-shrink: 0;
+}
+
 /* ── Show Player ── */
 .player-wrap { display: flex; flex-direction: column; height: 100%; overflow: hidden; }
 .player-header { padding: 20px 24px 16px; border-bottom: 1px solid #2a2a36; flex-shrink: 0; }
