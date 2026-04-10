@@ -399,17 +399,23 @@ body { background: #0f0f13; color: #e0e0e0; font-family: 'Segoe UI', system-ui, 
 .preset-strobe:hover { animation: strobe-anim 0.2s linear infinite; }
 @keyframes strobe-anim { 0%,100%{background-position:0%} 50%{background-position:100%} }
 
-/* Preset row header — label + brightness side-by-side */
-.preset-row-header {
-  display: flex; align-items: center; justify-content: space-between;
-  margin-bottom: 10px; gap: 16px; flex-wrap: wrap;
+/* Preset section label */
+.preset-section-label {
+  font-size: 11px; color: #666; text-transform: uppercase;
+  letter-spacing: 0.6px; margin-bottom: 8px;
 }
-.preset-brightness {
-  display: flex; align-items: center; gap: 8px; flex: 1; min-width: 180px; max-width: 320px;
+
+/* Brightness + strobe sliders below the swatches */
+.preset-sliders {
+  margin-top: 14px; display: flex; flex-direction: column; gap: 8px;
 }
-.preset-bright-label { font-size: 11px; color: #888; white-space: nowrap; }
+.preset-slider-row {
+  display: flex; align-items: center; gap: 10px;
+}
+.preset-bright-label { font-size: 11px; color: #888; white-space: nowrap; min-width: 76px; }
 .preset-bright-slider { flex: 1; accent-color: #f5c518; cursor: pointer; }
-.preset-bright-val { font-size: 11px; color: #ccc; min-width: 32px; text-align: right; }
+.preset-strobe-slider { flex: 1; accent-color: #ffffff; cursor: pointer; }
+.preset-bright-val { font-size: 11px; color: #ccc; min-width: 36px; text-align: right; }
 
 /* ── Analysis modal ── */
 .modal-overlay {

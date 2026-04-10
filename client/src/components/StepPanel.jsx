@@ -181,22 +181,21 @@ function applyBrightnessScale(colours, brightness) {
 
 function PresetPicker({ step, onChange }) {
   const currentPreset = step._preset ?? null;
-  const strobeOn      = (step.par?.strobe ?? 0) > 0;
   const brightness    = step._brightness ?? 100;
+  const strobe        = step.par?.strobe ?? 0;
 
   function applyPreset(idx) {
-    const p = PRESETS[idx];
-    const par  = { ...applyBrightnessScale(p.par,  brightness), strobe: strobeOn ? 200 : 0, brightness };
+    const p   = PRESETS[idx];
+    const par  = { ...applyBrightnessScale(p.par, brightness), strobe, brightness };
     const spot = { ...applyBrightnessScale(p.spot, brightness), brightness };
     onChange({ par, spot, _preset: idx, _brightness: brightness });
   }
 
   function changeBrightness(val) {
     const newBright = parseInt(val);
-    // Re-apply current preset at new brightness if one is selected
     if (currentPreset !== null) {
-      const p   = PRESETS[currentPreset];
-      const par  = { ...applyBrightnessScale(p.par,  newBright), strobe: strobeOn ? 200 : 0, brightness: newBright };
+      const p    = PRESETS[currentPreset];
+      const par  = { ...applyBrightnessScale(p.par, newBright), strobe, brightness: newBright };
       const spot = { ...applyBrightnessScale(p.spot, newBright), brightness: newBright };
       onChange({ par, spot, _brightness: newBright });
     } else {
@@ -204,24 +203,16 @@ function PresetPicker({ step, onChange }) {
     }
   }
 
-  function toggleStrobe() {
-    onChange({ par: { ...(step.par ?? {}), strobe: strobeOn ? 0 : 200 } });
+  function changeStrobe(val) {
+    const newStrobe = parseInt(val);
+    onChange({ par: { ...(step.par ?? {}), strobe: newStrobe } });
   }
 
   return (
     <div className="preset-picker">
-      <div className="preset-row-header">
-        <span className="preset-label">Colour preset</span>
-        <div className="preset-brightness">
-          <span className="preset-bright-label">☀ Brightness</span>
-          <input
-            type="range" min={5} max={100} value={brightness}
-            onChange={e => changeBrightness(e.target.value)}
-            className="preset-bright-slider"
-          />
-          <span className="preset-bright-val">{brightness}%</span>
-        </div>
-      </div>
+
+      {/* Row 1: colour swatches */}
+      <div className="preset-section-label">Colour</div>
       <div className="preset-swatches">
         {PRESETS.map((p, i) => (
           <button
@@ -232,12 +223,30 @@ function PresetPicker({ step, onChange }) {
             title={p.label}
           ><span className="preset-swatch-label">{p.label}</span></button>
         ))}
-        <button
-          className={`preset-swatch preset-strobe${strobeOn ? ' preset-swatch-active' : ''}`}
-          onClick={toggleStrobe}
-          title="Strobe"
-        ><span className="preset-swatch-label">⚡ Strobe</span></button>
       </div>
+
+      {/* Row 2: Brightness + Strobe sliders */}
+      <div className="preset-sliders">
+        <div className="preset-slider-row">
+          <span className="preset-bright-label">☀ Brightness</span>
+          <input
+            type="range" min={5} max={100} value={brightness}
+            onChange={e => changeBrightness(e.target.value)}
+            className="preset-bright-slider"
+          />
+          <span className="preset-bright-val">{brightness}%</span>
+        </div>
+        <div className="preset-slider-row">
+          <span className="preset-bright-label">⚡ Strobe</span>
+          <input
+            type="range" min={0} max={255} value={strobe}
+            onChange={e => changeStrobe(e.target.value)}
+            className="preset-strobe-slider"
+          />
+          <span className="preset-bright-val">{strobe === 0 ? 'Off' : strobe}</span>
+        </div>
+      </div>
+
     </div>
   );
 }
