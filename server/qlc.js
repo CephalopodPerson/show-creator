@@ -65,12 +65,23 @@ function maxFunctionId(doc) {
 // ── Convert seconds to milliseconds (round to nearest ms) ───────────────────
 const s2ms = s => Math.round(parseFloat(s) * 1000);
 
+// Channels on the Beam Machine that belong to the operator (pan/tilt) —
+// the sequence must never own these or manual control is lost mid-show.
+const SPOT_EXCLUDED_CHANNELS = new Set([0, 1, 12, 13]); // pan, tilt, pan fine, tilt fine
+
 // ── Build bound scene element (all channels zeroed) ──────────────────────────
-function buildBoundScene(id, name, fixtures) {
-  const fixtureVals = fixtures.map(f => ({
-    '@_ID': f.id,
-    '#text': Array.from({ length: parseInt(f.channels) }, (_, i) => `${i},0`).join(','),
-  }));
+// spotFixtureId: ID of the moving-head fixture — its position channels are excluded
+//               so the sequence never takes ownership of pan/tilt.
+function buildBoundScene(id, name, fixtures, spotFixtureId) {
+  const fixtureVals = fixtures.map(f => {
+    const exclude = (spotFixtureId != null && f.id === spotFixtureId)
+      ? SPOT_EXCLUDED_CHANNELS : new Set();
+    const pairs = Array.from({ length: parseInt(f.channels) }, (_, i) => i)
+      .filter(i => !exclude.has(i))
+      .map(i => `${i},0`)
+      .join(',');
+    return { '@_ID': f.id, '#text': pairs };
+  });
   return {
     '@_ID': id,
     '@_Type': 'Scene',
@@ -104,12 +115,11 @@ function parDmx(params) {
 }
 
 function spotDmx(params) {
-  // params: { r,g,b,w, brightness, fade_in, fade_out }
-  // Pan/Tilt always 173/43 (stage position, handled live)
+  // params: { r,g,b,w, brightness }
+  // Pan/Tilt (ch 0,1,12,13) are NEVER written — operator controls position live.
   const dim = Math.round((params.brightness ?? 100) / 100 * 50); // max ~50 for spot dimmer
   const shutter = (params.brightness ?? 100) > 0 ? 205 : 0;     // open or closed
   return [
-    [0, 173], [1, 43],      // pan/tilt locked
     [3, shutter],
     [4, params.r  ?? 0],
     [5, params.g  ?? 0],
@@ -226,7 +236,7 @@ function mergeAndWrite(sourceQxwPath, outputPath, sequences, fixtureRoles, showN
   for (const seq of sequences) {
     // 1. Bound scene
     const boundId = nextId++;
-    funcs.push(buildBoundScene(boundId, `${seq.name} - Bound`, fixtures));
+    funcs.push(buildBoundScene(boundId, `${seq.name} - Bound`, fixtures, fixtureRoles.spot));
 
     // 2. Sort steps by time and convert to DMX
     const sorted = [...(seq.steps ?? [])].sort((a, b) => a.time_s - b.time_s);
