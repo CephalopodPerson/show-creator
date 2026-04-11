@@ -13,7 +13,7 @@
     "directories": { "output": "../dist-player" },
     "files": ["main.js", "server.js", "app.html"],
     "win": {
-      "target": "nsis",
+      "target": ["nsis", "portable"],
       "icon":   "../build/icon.png"
     },
     "nsis": {
@@ -28,6 +28,7 @@
     "electron-builder": "^24.13.0"
   },
   "dependencies": {
-    "express": "^4.18.2"
+    "express": "^4.18.2",
+    "ws":      "^8.18.0"
   }
 }

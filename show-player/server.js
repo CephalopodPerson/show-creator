@@ -1,5 +1,6 @@
-// Minimal local server — proxies QLC+ HTTP API calls to avoid CORS issues.
-const express = require('express');
+// Minimal local server — proxies QLC+ WebSocket API calls to avoid CORS issues.
+const express   = require('express');
+const WebSocket = require('ws');
 
 const app  = express();
 const PORT = 3848;
@@ -14,20 +15,35 @@ app.use((req, res, next) => {
 });
 
 // POST /qlc  { host?, port?, functionId, action }
-// Proxies to QLC+ built-in web API: GET /api/function?id=N&enable=1
+// Sends a QLC+ WebSocket API message: QLC+API|setFunctionStatus|<id>|<0|1>
 app.post('/qlc', async (req, res) => {
   const { host = '127.0.0.1', port = 9999, functionId, action = 1 } = req.body;
   if (functionId == null) return res.status(400).json({ error: 'functionId required' });
-  const enable = action ? 1 : 0;
-  const url = `http://${host}:${port}/api/function?id=${functionId}&enable=${enable}`;
+
+  const status  = action ? 1 : 0;
+  const message = `QLC+API|setFunctionStatus|${functionId}|${status}`;
+  const wsUrl   = `ws://${host}:${port}/qlcplusWS`;
+
   try {
-    const r    = await fetch(url);
-    const text = await r.text();
-    if (!r.ok) return res.status(502).json({ error: `QLC+ returned ${r.status}: ${text}` });
-    res.json({ ok: true, qlcResponse: text });
+    await new Promise((resolve, reject) => {
+      const ws = new WebSocket(wsUrl);
+      const timer = setTimeout(() => { ws.terminate(); reject(new Error('timeout')); }, 4000);
+
+      ws.on('open', () => {
+        ws.send(message);
+        clearTimeout(timer);
+        // Give QLC+ a moment to process, then close
+        setTimeout(() => { ws.close(); resolve(); }, 200);
+      });
+      ws.on('error', err => { clearTimeout(timer); reject(err); });
+    });
+
+    res.json({ ok: true, message });
   } catch (e) {
-    console.error('QLC+ HTTP error:', e.message);
-    res.status(500).json({ error: `Could not reach QLC+ at ${host}:${port} — is QLC+ running with web server enabled?` });
+    console.error('QLC+ WS error:', e.message);
+    res.status(500).json({
+      error: `Could not reach QLC+ at ${host}:${port} — is QLC+ running with -w flag?`,
+    });
   }
 });
 
