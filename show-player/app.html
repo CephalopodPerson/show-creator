@@ -247,7 +247,7 @@ function renderSequences(name) {
       ${isPlaying
         ? `<button class="btn-seq-stop" onclick="stopPlayback(true)">■ Stop</button>`
         : `<button class="btn-play" onclick="playSequence('${esc(name)}','${seq.id}')"
-             ${(!hasOsc || !hasAudio) ? 'disabled title="Export .qxw and upload audio first"' : ''}>▶ Play</button>`
+             ${!hasAudio ? 'disabled title="No audio uploaded for this sequence"' : ''}>▶ Play</button>`
       }
     `;
     seqList.appendChild(row);
@@ -262,21 +262,25 @@ async function playSequence(showName, seqId) {
   const seq  = show?.sequences?.find(s => s.id === seqId);
   if (!seq) return;
 
-  // Trigger QLC+ via local HTTP bridge
-  try {
-    const r = await fetch(`http://127.0.0.1:${BRIDGE_PORT}/qlc`, {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ host: qlcHost, port: 9999, functionId: seq.qlcFunctionId, action: 1 }),
-    });
-    if (!r.ok) {
-      const err = await r.json().catch(() => ({}));
-      setStatus('⚠ QLC+ error: ' + (err.error ?? 'unknown'), 'warn');
-    } else {
-      setStatus('▶ QLC+ sequence triggered', 'ok');
+  // Trigger QLC+ via local bridge — skip if no function ID exported yet
+  if (seq.qlcFunctionId) {
+    try {
+      const r = await fetch(`http://127.0.0.1:${BRIDGE_PORT}/qlc`, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ host: qlcHost, port: 9999, functionId: seq.qlcFunctionId, action: 1 }),
+      });
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({}));
+        setStatus('⚠ QLC+ error: ' + (err.error ?? 'unknown'), 'warn');
+      } else {
+        setStatus('▶ QLC+ sequence triggered', 'ok');
+      }
+    } catch (e) {
+      setStatus('⚠ Bridge not responding: ' + e.message, 'err');
     }
-  } catch (e) {
-    setStatus('⚠ Bridge not responding: ' + e.message, 'err');
+  } else {
+    setStatus('▶ Audio only — no QLC+ ID (export .qxw to enable lights)', '');
   }
 
   // Play audio from VPS
