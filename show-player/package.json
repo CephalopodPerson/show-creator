@@ -13,8 +13,14 @@
     "directories": { "output": "../dist-player" },
     "files": ["main.js", "server.js", "app.html"],
     "win": {
-      "target": ["nsis", "portable"],
-      "icon":   "../build/icon.png"
+      "target": [
+        { "target": "portable", "arch": ["x64"] },
+        { "target": "nsis",     "arch": ["x64"] }
+      ],
+      "icon": "../build/icon.png"
+    },
+    "portable": {
+      "artifactName": "ShowPlayer-portable.exe"
     },
     "nsis": {
       "oneClick":        false,
