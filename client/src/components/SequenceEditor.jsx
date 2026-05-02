@@ -22,6 +22,71 @@ const TRACK_DEFS = [
   { key: 'memo', label: 'MEMO', tip: 'Operator notes',                                          h: MEMO_H  },
 ];
 
+// ── Vibe themes ────────────────────────────────────────────────────────────────
+// Each vibe is a named palette of (par, spot) colour pairs that get cycled
+// across steps when the user applies a vibe. Brightness is deliberately kept
+// below 60% for all presets — bright white is almost never the right call.
+const VIBES = {
+  sexy: {
+    label: '🌹 Sexy',
+    desc:  'Deep reds, warm amber, slow purple — intimate and moody',
+    steps: [
+      { par: { r: 180, g: 0,  b: 0,   w: 0,   a: 0, uv: 0, strobe: 0, brightness: 45 }, spot: { r: 200, g: 0,  b: 0,   w: 0,   brightness: 45 } },
+      { par: { r: 160, g: 20, b: 0,   w: 40,  a: 60, uv: 0, strobe: 0, brightness: 40 }, spot: { r: 180, g: 30, b: 0,   w: 30,  brightness: 40 } },
+      { par: { r: 120, g: 0,  b: 80,  w: 0,   a: 0, uv: 0, strobe: 0, brightness: 50 }, spot: { r: 140, g: 0,  b: 90,  w: 0,   brightness: 50 } },
+      { par: { r: 200, g: 10, b: 0,   w: 20,  a: 0, uv: 0, strobe: 0, brightness: 35 }, spot: { r: 220, g: 10, b: 0,   w: 10,  brightness: 35 } },
+      { par: { r: 80,  g: 0,  b: 60,  w: 0,   a: 0, uv: 20, strobe: 0, brightness: 40 }, spot: { r: 100, g: 0,  b: 70,  w: 0,   brightness: 40 } },
+    ],
+  },
+  fun: {
+    label: '🎉 Fun',
+    desc:  'Bold cycling colours — blues, pinks, greens, lively and bright',
+    steps: [
+      { par: { r: 0,   g: 80,  b: 255, w: 0,  a: 0, uv: 0, strobe: 0, brightness: 55 }, spot: { r: 0,   g: 80,  b: 255, w: 0,  brightness: 55 } },
+      { par: { r: 255, g: 0,   b: 120, w: 0,  a: 0, uv: 0, strobe: 0, brightness: 55 }, spot: { r: 255, g: 0,   b: 120, w: 0,  brightness: 55 } },
+      { par: { r: 0,   g: 200, b: 0,   w: 0,  a: 0, uv: 0, strobe: 0, brightness: 50 }, spot: { r: 0,   g: 200, b: 0,   w: 0,  brightness: 50 } },
+      { par: { r: 255, g: 100, b: 0,   w: 0,  a: 0, uv: 0, strobe: 0, brightness: 55 }, spot: { r: 255, g: 100, b: 0,   w: 0,  brightness: 55 } },
+      { par: { r: 120, g: 0,   b: 255, w: 0,  a: 0, uv: 0, strobe: 0, brightness: 55 }, spot: { r: 120, g: 0,   b: 255, w: 0,  brightness: 55 } },
+      { par: { r: 0,   g: 200, b: 200, w: 0,  a: 0, uv: 0, strobe: 0, brightness: 50 }, spot: { r: 0,   g: 200, b: 200, w: 0,  brightness: 50 } },
+    ],
+  },
+  dark: {
+    label: '🖤 Dark',
+    desc:  'Deep blues, purples, UV hints — dramatic and shadowy',
+    steps: [
+      { par: { r: 0,   g: 0,   b: 120, w: 0,  a: 0, uv: 30, strobe: 0, brightness: 30 }, spot: { r: 0,   g: 0,   b: 140, w: 0,  brightness: 30 } },
+      { par: { r: 60,  g: 0,   b: 100, w: 0,  a: 0, uv: 40, strobe: 0, brightness: 25 }, spot: { r: 70,  g: 0,   b: 120, w: 0,  brightness: 25 } },
+      { par: { r: 0,   g: 0,   b: 80,  w: 0,  a: 0, uv: 60, strobe: 0, brightness: 20 }, spot: { r: 20,  g: 0,   b: 80,  w: 0,  brightness: 20 } },
+      { par: { r: 80,  g: 0,   b: 80,  w: 0,  a: 0, uv: 20, strobe: 0, brightness: 30 }, spot: { r: 90,  g: 0,   b: 90,  w: 0,  brightness: 30 } },
+    ],
+  },
+  warm: {
+    label: '🕯 Warm',
+    desc:  'Amber, candlelight, soft orange — cosy and flattering',
+    steps: [
+      { par: { r: 255, g: 100, b: 10,  w: 100, a: 80, uv: 0, strobe: 0, brightness: 50 }, spot: { r: 255, g: 120, b: 30,  w: 80,  brightness: 50 } },
+      { par: { r: 220, g: 80,  b: 0,   w: 80,  a: 60, uv: 0, strobe: 0, brightness: 45 }, spot: { r: 240, g: 100, b: 10,  w: 60,  brightness: 45 } },
+      { par: { r: 255, g: 140, b: 20,  w: 180, a: 0,  uv: 0, strobe: 0, brightness: 55 }, spot: { r: 255, g: 160, b: 60,  w: 150, brightness: 55 } },
+      { par: { r: 200, g: 60,  b: 0,   w: 60,  a: 100, uv: 0, strobe: 0, brightness: 40 }, spot: { r: 220, g: 80,  b: 0,   w: 50,  brightness: 40 } },
+    ],
+  },
+  hype: {
+    label: '⚡ Hype',
+    desc:  'Punchy reds, hot white hits, high energy',
+    steps: [
+      { par: { r: 255, g: 0,   b: 0,   w: 0,  a: 0, uv: 0, strobe: 0, brightness: 60 }, spot: { r: 255, g: 0,   b: 0,   w: 0,  brightness: 60 } },
+      { par: { r: 255, g: 80,  b: 0,   w: 0,  a: 0, uv: 0, strobe: 0, brightness: 58 }, spot: { r: 255, g: 80,  b: 0,   w: 0,  brightness: 58 } },
+      { par: { r: 200, g: 200, b: 200, w: 200, a: 0, uv: 0, strobe: 0, brightness: 55 }, spot: { r: 220, g: 220, b: 200, w: 180, brightness: 55 } },
+      { par: { r: 255, g: 0,   b: 0,   w: 0,  a: 0, uv: 0, strobe: 0, brightness: 60 }, spot: { r: 255, g: 0,   b: 0,   w: 0,  brightness: 60 } },
+      { par: { r: 0,   g: 0,   b: 255, w: 0,  a: 0, uv: 0, strobe: 0, brightness: 58 }, spot: { r: 0,   g: 0,   b: 255, w: 0,  brightness: 58 } },
+    ],
+  },
+};
+
+// Warm amber default — used for auto-created and split steps
+const DEFAULT_PAR  = { r: 180, g: 60, b: 0, w: 60, a: 40, uv: 0, strobe: 0, brightness: 45 };
+const DEFAULT_SPOT = { r: 200, g: 80, b: 10, w: 50, brightness: 45 };
+
 export default function SequenceEditor({ sequence, showName, fixtures, onSave, mode = 'advanced' }) {
   const [steps,        setSteps]       = useState(sequence.steps ?? []);
   const [audioPath,    setAudioPath]   = useState(sequence.audioPath ?? null);
@@ -33,7 +98,8 @@ export default function SequenceEditor({ sequence, showName, fixtures, onSave, m
   const [zoomIdx,      setZoomIdx]     = useState(0);    // index into ZOOM_STEPS
   const [containerW,   setContainerW]  = useState(0);   // scroll-area pixel width
 
-  // Audio analysis state
+  // Vibe + analysis state
+  const [showVibes,    setShowVibes]   = useState(false);
   const [analyzing,    setAnalyzing]   = useState(false);
   const [suggestions,  setSuggestions] = useState([]);   // array of { t, label }
   const [selSugg,      setSelSugg]     = useState(new Set());
@@ -79,8 +145,8 @@ export default function SequenceEditor({ sequence, showName, fixtures, onSave, m
         fade_out_s:  0,
         parEnabled:  true,
         spotEnabled: true,
-        par:  { r: 200, g: 200, b: 200, w: 0, a: 0, uv: 0, strobe: 0, brightness: 80 },
-        spot: { r: 255, g: 255, b: 200, w: 0, brightness: 80 },
+        par:  { ...DEFAULT_PAR },
+        spot: { ...DEFAULT_SPOT },
         memo: '',
       };
       setSteps([s]);
@@ -114,6 +180,20 @@ export default function SequenceEditor({ sequence, showName, fixtures, onSave, m
     setWarnings(data.warnings ?? []);
     setAudioPath(data.path);
     triggerSave(steps, data.path);
+  }
+
+  // ── Apply a vibe theme across all steps ────────────────────────────────────
+  function applyVibe(vibeKey) {
+    const vibe    = VIBES[vibeKey];
+    const palette = vibe.steps;
+    const sorted  = [...steps].sort((a, b) => a.time_s - b.time_s);
+    const newSteps = sorted.map((step, i) => ({
+      ...step,
+      par:  { ...palette[i % palette.length].par  },
+      spot: { ...palette[i % palette.length].spot },
+    }));
+    updateSteps(newSteps);
+    setShowVibes(false);
   }
 
   // ── Audio analysis: detect energy transitions and suggest splits ────────────
@@ -320,6 +400,13 @@ export default function SequenceEditor({ sequence, showName, fixtures, onSave, m
           {audioPath ? '🎵 Change audio' : '🎵 Upload audio'}
           <input type="file" accept="audio/*" hidden onChange={uploadAudio} />
         </label>
+        {steps.length > 0 && (
+          <button
+            className="btn-secondary"
+            onClick={() => setShowVibes(v => !v)}
+            title="Apply a lighting vibe theme to all steps"
+          >🎨 Vibe</button>
+        )}
         {audioPath && (
           <button
             className="btn-secondary"
@@ -396,6 +483,34 @@ export default function SequenceEditor({ sequence, showName, fixtures, onSave, m
           onDelete={() => deleteStep(selected.id)}
           mode={mode}
         />
+      )}
+
+      {/* ── Vibe picker ── */}
+      {showVibes && (
+        <div className="modal-overlay" onClick={() => setShowVibes(false)}>
+          <div className="modal-box vibe-modal" onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <span className="modal-title">🎨 Choose a vibe</span>
+              <button className="modal-close" onClick={() => setShowVibes(false)}>✕</button>
+            </div>
+            <p className="analysis-hint">Applies a colour palette across all {steps.length} steps. You can still tweak individual steps after.</p>
+            <div className="vibe-list">
+              {Object.entries(VIBES).map(([key, v]) => (
+                <button key={key} className="vibe-card" onClick={() => applyVibe(key)}>
+                  <span className="vibe-label">{v.label}</span>
+                  <span className="vibe-desc">{v.desc}</span>
+                  <div className="vibe-swatches">
+                    {v.steps.map((s, i) => (
+                      <span key={i} className="vibe-dot" style={{
+                        background: `rgb(${Math.round(s.par.r * s.par.brightness / 100)},${Math.round(s.par.g * s.par.brightness / 100)},${Math.round(s.par.b * s.par.brightness / 100)})`
+                      }} />
+                    ))}
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
       )}
 
       {/* ── Audio analysis suggestions modal ── */}

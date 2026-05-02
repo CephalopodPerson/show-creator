@@ -181,7 +181,7 @@ function applyBrightnessScale(colours, brightness) {
 
 function PresetPicker({ step, onChange }) {
   const currentPreset = step._preset ?? null;
-  const brightness    = step._brightness ?? 100;
+  const brightness    = step._brightness ?? 60;
   const strobe        = step.par?.strobe ?? 0;
 
   function applyPreset(idx) {
