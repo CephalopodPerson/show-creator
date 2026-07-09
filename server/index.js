@@ -1,19 +1,50 @@
-const express  = require('express');
-const multer   = require('multer');
-const cors     = require('cors');
-const path     = require('path');
-const fs       = require('fs');
-const dgram    = require('dgram');
+const express     = require('express');
+const multer      = require('multer');
+const cors        = require('cors');
+const path        = require('path');
+const fs          = require('fs');
+const dgram       = require('dgram');
+const compression = require('compression');
 const { v4: uuid } = require('uuid');
 const { parseQxw, extractFixtures, mergeAndWrite } = require('./qlc');
 
 const app  = express();
 const PORT = process.env.PORT || 3000;
-// SHOWS_DIR can be overridden by Electron main process to use the OS user-data dir
-const SHOWS_DIR = process.env.SHOWS_DIR || path.join(__dirname, '..', 'shows');
+const SHOWS_DIR    = process.env.SHOWS_DIR || path.join(__dirname, '..', 'shows');
+const ARCHIVE_DIR  = process.env.ARCHIVE_DIR || path.join(__dirname, '..', 'archive');
+const SETTINGS_FILE = path.join(__dirname, '..', 'data', 'settings.json');
+const ADMIN_PIN    = process.env.ADMIN_PIN || '1234';
 
+// In-memory admin sessions (token → expiry)
+const adminSessions = new Map();
+
+app.use(compression());
 app.use(cors());
 app.use(express.json());
+
+// ── Settings helpers ──────────────────────────────────────────────────────────
+const DEFAULT_SETTINGS = { defaultBrightness: 45, maxBrightness: 60 };
+
+function loadSettings() {
+  try {
+    if (fs.existsSync(SETTINGS_FILE)) return { ...DEFAULT_SETTINGS, ...JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8')) };
+  } catch {}
+  return { ...DEFAULT_SETTINGS };
+}
+
+function saveSettings(data) {
+  fs.mkdirSync(path.dirname(SETTINGS_FILE), { recursive: true });
+  fs.writeFileSync(SETTINGS_FILE, JSON.stringify(data, null, 2));
+}
+
+// ── Admin auth middleware ─────────────────────────────────────────────────────
+function requireAdmin(req, res, next) {
+  const token = req.headers['x-admin-token'];
+  const exp   = adminSessions.get(token);
+  if (!token || !exp || Date.now() > exp) return res.status(401).json({ error: 'Admin auth required' });
+  adminSessions.set(token, Date.now() + 4 * 60 * 60 * 1000); // refresh
+  next();
+}
 
 // Serve React build in production (Electron sets CLIENT_DIST to the correct path)
 const CLIENT_DIST = process.env.CLIENT_DIST || path.join(__dirname, '..', 'client', 'dist');
@@ -49,7 +80,23 @@ function saveShow(name, data) {
 
 // ── Routes ───────────────────────────────────────────────────────────────────
 
-// List all shows
+// Settings
+app.get('/api/settings', (req, res) => res.json(loadSettings()));
+app.put('/api/settings', requireAdmin, (req, res) => {
+  const s = { ...loadSettings(), ...req.body };
+  saveSettings(s);
+  res.json(s);
+});
+
+// Admin login
+app.post('/api/admin/login', (req, res) => {
+  if (req.body.pin !== ADMIN_PIN) return res.status(401).json({ error: 'Wrong PIN' });
+  const token = uuid();
+  adminSessions.set(token, Date.now() + 4 * 60 * 60 * 1000);
+  res.json({ token });
+});
+
+// List all shows (excludes archived)
 app.get('/api/shows', (req, res) => {
   if (!fs.existsSync(SHOWS_DIR)) return res.json([]);
   const shows = fs.readdirSync(SHOWS_DIR)
@@ -172,13 +219,70 @@ app.delete('/api/shows/:showName/sequences/:seqId', (req, res) => {
   res.json({ ok: true });
 });
 
-// ── Delete a show ─────────────────────────────────────────────────────────────
-app.delete('/api/shows/:showName', (req, res) => {
+// ── Archive a show (moves to archive dir) ────────────────────────────────────
+app.post('/api/shows/:showName/archive', (req, res) => {
   const { showName } = req.params;
-  const dir = showPath(showName);
-  if (!fs.existsSync(dir)) return res.status(404).json({ error: 'Show not found' });
+  const src = showPath(showName);
+  if (!fs.existsSync(src)) return res.status(404).json({ error: 'Show not found' });
+  fs.mkdirSync(ARCHIVE_DIR, { recursive: true });
+  const dst = path.join(ARCHIVE_DIR, showName);
+  if (fs.existsSync(dst)) fs.rmSync(dst, { recursive: true, force: true });
+  fs.renameSync(src, dst);
+  res.json({ ok: true });
+});
+
+// ── List archived shows ───────────────────────────────────────────────────────
+app.get('/api/archive', requireAdmin, (req, res) => {
+  if (!fs.existsSync(ARCHIVE_DIR)) return res.json([]);
+  const shows = fs.readdirSync(ARCHIVE_DIR)
+    .filter(d => fs.statSync(path.join(ARCHIVE_DIR, d)).isDirectory())
+    .map(name => {
+      try {
+        const p = path.join(ARCHIVE_DIR, name, 'show.json');
+        const data = fs.existsSync(p) ? JSON.parse(fs.readFileSync(p, 'utf8')) : {};
+        return { name, sequences: data?.sequences?.length ?? 0, updatedAt: data?.updatedAt };
+      } catch { return { name, sequences: 0 }; }
+    });
+  res.json(shows);
+});
+
+// ── Restore show from archive ─────────────────────────────────────────────────
+app.post('/api/archive/:showName/restore', requireAdmin, (req, res) => {
+  const { showName } = req.params;
+  const src = path.join(ARCHIVE_DIR, showName);
+  if (!fs.existsSync(src)) return res.status(404).json({ error: 'Not in archive' });
+  const dst = showPath(showName);
+  if (fs.existsSync(dst)) return res.status(409).json({ error: 'A show with that name already exists' });
+  fs.renameSync(src, dst);
+  res.json({ ok: true });
+});
+
+// ── Hard-delete a show from archive (admin only) ──────────────────────────────
+app.delete('/api/archive/:showName', requireAdmin, (req, res) => {
+  const { showName } = req.params;
+  const dir = path.join(ARCHIVE_DIR, showName);
+  if (!fs.existsSync(dir)) return res.status(404).json({ error: 'Not in archive' });
   fs.rmSync(dir, { recursive: true, force: true });
   res.json({ ok: true });
+});
+
+// ── Copy from archive to active shows ────────────────────────────────────────
+app.post('/api/archive/:showName/copy', requireAdmin, (req, res) => {
+  const { showName } = req.params;
+  const src = path.join(ARCHIVE_DIR, showName);
+  if (!fs.existsSync(src)) return res.status(404).json({ error: 'Not in archive' });
+  const newName = req.body.name || showName + ' (copy)';
+  const dst = showPath(newName);
+  if (fs.existsSync(dst)) return res.status(409).json({ error: 'Name already taken' });
+  fs.cpSync(src, dst, { recursive: true });
+  // Update name in show.json
+  const jsonPath = path.join(dst, 'show.json');
+  if (fs.existsSync(jsonPath)) {
+    const data = JSON.parse(fs.readFileSync(jsonPath, 'utf8'));
+    data.name = newName; data.updatedAt = new Date().toISOString();
+    fs.writeFileSync(jsonPath, JSON.stringify(data, null, 2));
+  }
+  res.json({ ok: true, name: newName });
 });
 
 // ── Reorder sequences ─────────────────────────────────────────────────────────

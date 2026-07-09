@@ -98,8 +98,14 @@ export default function SequenceEditor({ sequence, showName, fixtures, onSave, m
   const [zoomIdx,      setZoomIdx]     = useState(0);    // index into ZOOM_STEPS
   const [containerW,   setContainerW]  = useState(0);   // scroll-area pixel width
 
-  // Vibe + analysis state
+  // Vibe + analysis + wizard state
   const [showVibes,    setShowVibes]   = useState(false);
+  const [showWizard,   setShowWizard]  = useState(false);
+  const [wizardStep,   setWizardStep]  = useState(1);
+  const [wizardMood,   setWizardMood]  = useState('fun');
+  const [wizardAggr,   setWizardAggr]  = useState(3);   // 1=subtle … 5=intense
+  const [wizardMinLen, setWizardMinLen] = useState(8);   // seconds min step length
+  const [wizardRunning, setWizardRunning] = useState(false);
   const [analyzing,    setAnalyzing]   = useState(false);
   const [suggestions,  setSuggestions] = useState([]);   // array of { t, label }
   const [selSugg,      setSelSugg]     = useState(new Set());
@@ -194,6 +200,109 @@ export default function SequenceEditor({ sequence, showName, fixtures, onSave, m
     }));
     updateSteps(newSteps);
     setShowVibes(false);
+  }
+
+  // ── Auto lighting wizard ────────────────────────────────────────────────────
+  async function runWizard() {
+    if (!audioPath) return;
+    setWizardRunning(true);
+    try {
+      const res    = await fetch(audioPath);
+      const buf    = await res.arrayBuffer();
+      const tmpCtx = new (window.AudioContext || window.webkitAudioContext)();
+      const decoded = await tmpCtx.decodeAudioData(buf);
+      tmpCtx.close();
+
+      const sr        = decoded.sampleRate;
+      const WINDOW_S  = 0.25;  // finer windows for beat detection
+      const winSamp   = Math.round(WINDOW_S * sr);
+      const numWin    = Math.ceil(decoded.length / winSamp);
+      const numCh     = decoded.numberOfChannels;
+
+      // Compute RMS energy per window (mono mix)
+      const rms = [];
+      for (let i = 0; i < numWin; i++) {
+        const start = i * winSamp, end = Math.min(start + winSamp, decoded.length);
+        let sum = 0;
+        for (let ch = 0; ch < numCh; ch++) {
+          const d = decoded.getChannelData(ch);
+          for (let j = start; j < end; j++) sum += d[j] * d[j];
+        }
+        rms.push(Math.sqrt(sum / ((end - start) * numCh)));
+      }
+
+      // Smooth: 7-point moving average
+      const smooth = rms.map((_, i) => {
+        const lo = Math.max(0, i - 3), hi = Math.min(rms.length - 1, i + 3);
+        return rms.slice(lo, hi + 1).reduce((a, b) => a + b, 0) / (hi - lo + 1);
+      });
+
+      // Aggressiveness controls:
+      //   1 = only huge drops (threshold 2.5×, look-back 4s, min gap 20s)
+      //   5 = catch all changes (threshold 1.3×, look-back 1s, min gap 4s)
+      const aggr     = wizardAggr;
+      const threshold = 2.5 - (aggr - 1) * 0.3;           // 2.5 → 1.3
+      const lookBack  = Math.round((4 - (aggr - 1) * 0.6) / WINDOW_S); // 4s → 1.6s
+      const minGapS   = Math.max(wizardMinLen, 20 - (aggr - 1) * 4);   // 20s → 4s
+      const lookAhead = Math.round(0.5 / WINDOW_S);
+
+      const splitPoints = [0]; // always start at 0
+      for (let i = lookBack; i < smooth.length - lookAhead; i++) {
+        const before = smooth.slice(Math.max(0, i - lookBack), i).reduce((a, b) => a + b, 0) / lookBack;
+        const after  = smooth.slice(i, Math.min(smooth.length, i + lookAhead)).reduce((a, b) => a + b, 0) / lookAhead;
+        const t      = i * WINDOW_S;
+        if (before > 0.0003 && after > before * threshold) {
+          const lastT = splitPoints[splitPoints.length - 1];
+          if (t - lastT >= minGapS) splitPoints.push(parseFloat(t.toFixed(2)));
+        }
+      }
+
+      // Build steps from split points
+      const totalDur = parseFloat(decoded.duration.toFixed(2));
+      const palette  = VIBES[wizardMood]?.steps ?? VIBES.fun.steps;
+
+      const newSteps = splitPoints.map((t, idx) => {
+        const nextT    = splitPoints[idx + 1] ?? totalDur;
+        const dur      = parseFloat((nextT - t).toFixed(2));
+        const colours  = palette[idx % palette.length];
+
+        // Vary brightness slightly based on local energy at this split point
+        const winIdx   = Math.round(t / WINDOW_S);
+        const localRms = smooth[Math.min(winIdx, smooth.length - 1)] ?? 0;
+        const peak     = Math.max(...smooth);
+        const energyPct = peak > 0 ? Math.min(1, localRms / peak) : 0.5;
+        // Scale brightness: quiet = 70% of preset brightness, loud = 100%
+        const bScale   = 0.7 + 0.3 * energyPct;
+
+        const scalePar  = { ...colours.par,  brightness: Math.round(colours.par.brightness  * bScale) };
+        const scaleSpot = { ...colours.spot, brightness: Math.round(colours.spot.brightness * bScale) };
+
+        // Fade in for first step, longer fades for calmer vibes
+        const fadeIn  = idx === 0 ? 0 : (aggr <= 2 ? 1.5 : aggr <= 3 ? 0.8 : 0.3);
+        const fadeOut = idx === splitPoints.length - 1 ? 2 : 0;
+
+        return {
+          id:          crypto.randomUUID(),
+          time_s:      t,
+          duration_s:  dur,
+          fade_in_s:   fadeIn,
+          fade_out_s:  fadeOut,
+          parEnabled:  true,
+          spotEnabled: true,
+          par:         scalePar,
+          spot:        scaleSpot,
+          memo:        '',
+        };
+      });
+
+      updateSteps(newSteps);
+      setShowWizard(false);
+      setWizardStep(1);
+    } catch (err) {
+      console.error('Wizard failed:', err);
+      setWarnings(w => [...w, `Wizard failed: ${err.message}`]);
+    }
+    setWizardRunning(false);
   }
 
   // ── Audio analysis: detect energy transitions and suggest splits ────────────
@@ -400,6 +509,13 @@ export default function SequenceEditor({ sequence, showName, fixtures, onSave, m
           {audioPath ? '🎵 Change audio' : '🎵 Upload audio'}
           <input type="file" accept="audio/*" hidden onChange={uploadAudio} />
         </label>
+        {audioPath && (
+          <button
+            className="btn-primary"
+            onClick={() => { setShowWizard(true); setWizardStep(1); }}
+            title="Auto-generate lighting steps from the song"
+          >🪄 Wizard</button>
+        )}
         {steps.length > 0 && (
           <button
             className="btn-secondary"
@@ -483,6 +599,115 @@ export default function SequenceEditor({ sequence, showName, fixtures, onSave, m
           onDelete={() => deleteStep(selected.id)}
           mode={mode}
         />
+      )}
+
+      {/* ── Auto lighting wizard ── */}
+      {showWizard && (
+        <div className="modal-overlay" onClick={() => !wizardRunning && setShowWizard(false)}>
+          <div className="modal-box wizard-modal" onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <span className="modal-title">🪄 Lighting Wizard</span>
+              {!wizardRunning && <button className="modal-close" onClick={() => setShowWizard(false)}>✕</button>}
+            </div>
+
+            {wizardRunning ? (
+              <div className="wizard-running">
+                <div className="wizard-spinner" />
+                <p>Analysing song and building your light show…</p>
+              </div>
+            ) : (
+              <>
+                {/* Step 1: Mood */}
+                {wizardStep === 1 && (
+                  <div className="wizard-step">
+                    <p className="wizard-step-label">Step 1 of 3 — What's the mood?</p>
+                    <div className="vibe-list">
+                      {Object.entries(VIBES).map(([key, v]) => (
+                        <button
+                          key={key}
+                          className={`vibe-card${wizardMood === key ? ' vibe-card-selected' : ''}`}
+                          onClick={() => setWizardMood(key)}
+                        >
+                          <span className="vibe-label">{v.label}</span>
+                          <span className="vibe-desc">{v.desc}</span>
+                          <div className="vibe-swatches">
+                            {v.steps.map((s, i) => (
+                              <span key={i} className="vibe-dot" style={{
+                                background: `rgb(${Math.round(s.par.r * s.par.brightness / 100)},${Math.round(s.par.g * s.par.brightness / 100)},${Math.round(s.par.b * s.par.brightness / 100)})`
+                              }} />
+                            ))}
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                    <div className="wizard-nav">
+                      <span />
+                      <button className="btn-primary" onClick={() => setWizardStep(2)}>Next →</button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Step 2: Aggressiveness */}
+                {wizardStep === 2 && (
+                  <div className="wizard-step">
+                    <p className="wizard-step-label">Step 2 of 3 — How aggressive should the changes be?</p>
+                    <div className="wizard-aggr-grid">
+                      {[
+                        { val: 1, label: 'Very subtle',  desc: 'Few changes, long sections, slow fades' },
+                        { val: 2, label: 'Gentle',       desc: 'Changes on big song moments only' },
+                        { val: 3, label: 'Moderate',     desc: 'Balanced — good for most shows' },
+                        { val: 4, label: 'Dynamic',      desc: 'Frequent changes, follows energy closely' },
+                        { val: 5, label: 'Intense',      desc: 'Maximum changes, tight beat-following' },
+                      ].map(o => (
+                        <button
+                          key={o.val}
+                          className={`wizard-aggr-btn${wizardAggr === o.val ? ' wizard-aggr-active' : ''}`}
+                          onClick={() => setWizardAggr(o.val)}
+                        >
+                          <span className="wizard-aggr-label">{o.label}</span>
+                          <span className="wizard-aggr-desc">{o.desc}</span>
+                        </button>
+                      ))}
+                    </div>
+                    <div className="wizard-nav">
+                      <button className="btn-secondary" onClick={() => setWizardStep(1)}>← Back</button>
+                      <button className="btn-primary"   onClick={() => setWizardStep(3)}>Next →</button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Step 3: Min length + confirm */}
+                {wizardStep === 3 && (
+                  <div className="wizard-step">
+                    <p className="wizard-step-label">Step 3 of 3 — Minimum section length</p>
+                    <p className="analysis-hint">Sections shorter than this will be merged. Raise it if you want fewer, longer steps.</p>
+                    <div className="wizard-minlen-row">
+                      <input
+                        type="range" min={2} max={30} value={wizardMinLen}
+                        onChange={e => setWizardMinLen(+e.target.value)}
+                        className="preset-bright-slider"
+                        style={{ flex: 1 }}
+                      />
+                      <span className="preset-bright-val">{wizardMinLen}s</span>
+                    </div>
+                    <div className="wizard-summary">
+                      <span>Mood: <strong>{VIBES[wizardMood]?.label}</strong></span>
+                      <span>Changes: <strong>{'★'.repeat(wizardAggr)}{'☆'.repeat(5 - wizardAggr)}</strong></span>
+                      <span>Min section: <strong>{wizardMinLen}s</strong></span>
+                    </div>
+                    {steps.length > 0 && (
+                      <p className="wizard-warn">⚠ This will replace your {steps.length} existing step{steps.length !== 1 ? 's' : ''}.</p>
+                    )}
+                    <div className="wizard-nav">
+                      <button className="btn-secondary" onClick={() => setWizardStep(2)}>← Back</button>
+                      <button className="btn-primary" onClick={runWizard}>✨ Generate</button>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        </div>
       )}
 
       {/* ── Vibe picker ── */}

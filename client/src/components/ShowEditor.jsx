@@ -147,7 +147,7 @@ export default function ShowEditor({ showName, mode = 'advanced' }) {
   }
 
   // ── Delete sequence ───────────────────────────────────────────────────────
-  function requestDelete(id) { setConfirmId(id); setAddingSeq(false); setCopyingId(null); }
+  function requestDelete(id) { setConfirmId(id); setCopyingId(null); }
 
   async function confirmDelete() {
     const id = confirmId;
@@ -182,7 +182,7 @@ export default function ShowEditor({ showName, mode = 'advanced' }) {
 
   // ── Copy sequence to another show ─────────────────────────────────────────
   async function startCopy(id) {
-    setCopyingId(id); setConfirmId(null); setAddingSeq(false);
+    setCopyingId(id); setConfirmId(null);
     try {
       const data = await fetch('/api/shows').then(r => r.json());
       setAllShows(data.map(s => s.name).filter(n => n !== showName));

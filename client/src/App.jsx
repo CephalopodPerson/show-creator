@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
 import ShowList   from './components/ShowList';
 import ShowEditor from './components/ShowEditor';
+import AdminPanel from './components/AdminPanel';
 import './styles.css';
 
 export default function App() {
-  const [view, setView]         = useState('list');     // 'list' | 'editor'
+  const [view, setView]         = useState('list');     // 'list' | 'editor' | 'admin'
   const [showName, setShowName] = useState(null);
   const [mode, setMode]         = useState('advanced'); // 'basic' | 'advanced'
 
@@ -15,7 +16,7 @@ export default function App() {
     <div className="app">
       <header className="app-header">
         <div className="header-left">
-          {view === 'editor' && (
+          {(view === 'editor' || view === 'admin') && (
             <button className="btn-ghost" onClick={backToList}>← Shows</button>
           )}
           <h1 className="logo">Show Creator</h1>
@@ -41,8 +42,9 @@ export default function App() {
       </header>
 
       <main className="app-body">
-        {view === 'list'   && <ShowList   onOpen={openShow} />}
+        {view === 'list'   && <ShowList   onOpen={openShow} onAdmin={() => setView('admin')} />}
         {view === 'editor' && <ShowEditor showName={showName} mode={mode} />}
+        {view === 'admin'  && <AdminPanel onBack={backToList} />}
       </main>
     </div>
   );

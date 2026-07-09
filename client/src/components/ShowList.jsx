@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import StorageManager from './StorageManager';
 
-export default function ShowList({ onOpen }) {
-  const [shows,        setShows]        = useState([]);
-  const [newName,      setNewName]      = useState('');
-  const [confirmDel,   setConfirmDel]   = useState(null);
-  const [showStorage,  setShowStorage]  = useState(false);
+export default function ShowList({ onOpen, onAdmin }) {
+  const [shows,       setShows]       = useState([]);
+  const [newName,     setNewName]     = useState('');
+  const [confirmArch, setConfirmArch] = useState(null);
+  const [showStorage, setShowStorage] = useState(false);
 
   useEffect(() => {
     fetch('/api/shows').then(r => r.json()).then(setShows);
@@ -22,9 +22,9 @@ export default function ShowList({ onOpen }) {
     onOpen(name);
   }
 
-  async function deleteShow(name) {
-    setConfirmDel(null);
-    await fetch(`/api/shows/${encodeURIComponent(name)}`, { method: 'DELETE' });
+  async function archiveShow(name) {
+    setConfirmArch(null);
+    await fetch(`/api/shows/${encodeURIComponent(name)}/archive`, { method: 'POST' });
     setShows(prev => prev.filter(s => s.name !== name));
   }
 
@@ -32,9 +32,10 @@ export default function ShowList({ onOpen }) {
     <div className="show-list">
       <div className="show-list-title-row">
         <h2>Shows</h2>
-        <button className="btn-secondary storage-btn" onClick={() => setShowStorage(true)}>
-          💾 Storage
-        </button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button className="btn-secondary storage-btn" onClick={() => setShowStorage(true)}>💾 Storage</button>
+          <button className="btn-secondary storage-btn" onClick={onAdmin}>⚙ Admin</button>
+        </div>
       </div>
 
       <div className="new-show-row">
@@ -51,21 +52,21 @@ export default function ShowList({ onOpen }) {
       <div className="card-grid">
         {shows.map(s => (
           <div key={s.name} className="show-card-wrap">
-            <button className="show-card" onClick={() => { setConfirmDel(null); onOpen(s.name); }}>
+            <button className="show-card" onClick={() => { setConfirmArch(null); onOpen(s.name); }}>
               <span className="show-card-name">{s.name}</span>
               <span className="show-card-meta">{s.sequences} sequence{s.sequences !== 1 ? 's' : ''}</span>
             </button>
             <button
               className="show-card-delete"
-              title="Delete show"
-              onClick={e => { e.stopPropagation(); setConfirmDel(s.name); }}
-            >✕</button>
+              title="Archive show"
+              onClick={e => { e.stopPropagation(); setConfirmArch(s.name); }}
+            >▾</button>
 
-            {confirmDel === s.name && (
+            {confirmArch === s.name && (
               <div className="show-card-confirm">
-                <span>Delete "{s.name}"?</span>
-                <button className="seq-confirm-yes" onClick={() => deleteShow(s.name)}>Delete</button>
-                <button className="seq-confirm-no"  onClick={() => setConfirmDel(null)}>Cancel</button>
+                <span>Archive "{s.name}"?</span>
+                <button className="seq-confirm-yes" onClick={() => archiveShow(s.name)}>Archive</button>
+                <button className="seq-confirm-no"  onClick={() => setConfirmArch(null)}>Cancel</button>
               </div>
             )}
           </div>
