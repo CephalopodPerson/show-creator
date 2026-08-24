@@ -23,7 +23,13 @@ app.use(cors());
 app.use(express.json());
 
 // ── Settings helpers ──────────────────────────────────────────────────────────
-const DEFAULT_SETTINGS = { defaultBrightness: 45, maxBrightness: 60 };
+const DEFAULT_SETTINGS = {
+  defaultBrightness: 45,
+  maxBrightness:     60,
+  adminPin:          null,   // null → falls back to ADMIN_PIN env / '1234'
+  defaultQxwPath:    null,   // template .qxw applied to new shows
+  ledfx: { enabled: false, host: '127.0.0.1', port: 8888, virtuals: [] },
+};
 
 function loadSettings() {
   try {
@@ -35,6 +41,10 @@ function loadSettings() {
 function saveSettings(data) {
   fs.mkdirSync(path.dirname(SETTINGS_FILE), { recursive: true });
   fs.writeFileSync(SETTINGS_FILE, JSON.stringify(data, null, 2));
+}
+
+function currentPin() {
+  return loadSettings().adminPin || process.env.ADMIN_PIN || '1234';
 }
 
 // ── Admin auth middleware ─────────────────────────────────────────────────────
@@ -67,33 +77,104 @@ const upload = multer({ storage });
 function showPath(name)     { return path.join(SHOWS_DIR, name); }
 function showJsonPath(name) { return path.join(showPath(name), 'show.json'); }
 
+// In-memory show cache keyed by name → { mtimeMs, data }.
+// Avoids re-reading + re-parsing show.json on every request, which was the
+// main cost on show-list and show-open (both hit every show file).
+const showCache = new Map();
+
 function loadShow(name) {
   const p = showJsonPath(name);
-  if (!fs.existsSync(p)) return null;
-  return JSON.parse(fs.readFileSync(p, 'utf8'));
+  let st;
+  try { st = fs.statSync(p); } catch { return null; }
+
+  const hit = showCache.get(name);
+  if (hit && hit.mtimeMs === st.mtimeMs) return hit.data;
+
+  try {
+    const data = JSON.parse(fs.readFileSync(p, 'utf8'));
+    showCache.set(name, { mtimeMs: st.mtimeMs, data });
+    return data;
+  } catch { return null; }
 }
 
 function saveShow(name, data) {
   fs.mkdirSync(showPath(name), { recursive: true });
   fs.writeFileSync(showJsonPath(name), JSON.stringify(data, null, 2));
+  try {
+    showCache.set(name, { mtimeMs: fs.statSync(showJsonPath(name)).mtimeMs, data });
+  } catch { showCache.delete(name); }
 }
+
+function invalidateShow(name) { showCache.delete(name); }
 
 // ── Routes ───────────────────────────────────────────────────────────────────
 
-// Settings
-app.get('/api/settings', (req, res) => res.json(loadSettings()));
+// Settings — public read strips secrets; admin write
+app.get('/api/settings', (req, res) => {
+  const { adminPin, ...safe } = loadSettings();
+  res.json(safe);
+});
 app.put('/api/settings', requireAdmin, (req, res) => {
-  const s = { ...loadSettings(), ...req.body };
+  const { adminPin, ...rest } = req.body;   // PIN only changes via its own route
+  const s = { ...loadSettings(), ...rest };
   saveSettings(s);
-  res.json(s);
+  const { adminPin: _p, ...safe } = s;
+  res.json(safe);
 });
 
 // Admin login
 app.post('/api/admin/login', (req, res) => {
-  if (req.body.pin !== ADMIN_PIN) return res.status(401).json({ error: 'Wrong PIN' });
+  if (String(req.body.pin) !== String(currentPin())) return res.status(401).json({ error: 'Wrong PIN' });
   const token = uuid();
   adminSessions.set(token, Date.now() + 4 * 60 * 60 * 1000);
   res.json({ token });
+});
+
+// Change admin PIN
+app.post('/api/admin/pin', requireAdmin, (req, res) => {
+  const { currentPin: cur, newPin } = req.body;
+  if (String(cur) !== String(currentPin())) return res.status(401).json({ error: 'Current PIN is incorrect' });
+  if (!newPin || String(newPin).length < 4) return res.status(400).json({ error: 'New PIN must be at least 4 characters' });
+  const s = loadSettings();
+  s.adminPin = String(newPin);
+  saveSettings(s);
+  res.json({ ok: true });
+});
+
+// Upload a default .qxw template (admin)
+const templateUpload = multer({
+  storage: multer.diskStorage({
+    destination: (req, file, cb) => {
+      const dir = path.join(__dirname, '..', 'data');
+      fs.mkdirSync(dir, { recursive: true });
+      cb(null, dir);
+    },
+    filename: (req, file, cb) => cb(null, 'default-template.qxw'),
+  }),
+});
+
+app.post('/api/admin/template', requireAdmin, templateUpload.single('qxw'), (req, res) => {
+  try {
+    const doc      = parseQxw(req.file.path);
+    const fixtures = extractFixtures(doc);
+    const s = loadSettings();
+    s.defaultQxwPath = req.file.path;
+    saveSettings(s);
+    res.json({ ok: true, fixtures });
+  } catch (e) {
+    res.status(400).json({ error: 'Could not parse .qxw: ' + e.message });
+  }
+});
+
+app.get('/api/admin/template', requireAdmin, (req, res) => {
+  const s = loadSettings();
+  if (!s.defaultQxwPath || !fs.existsSync(s.defaultQxwPath)) return res.json({ present: false });
+  try {
+    const fixtures = extractFixtures(parseQxw(s.defaultQxwPath));
+    res.json({ present: true, fixtures, size: fs.statSync(s.defaultQxwPath).size });
+  } catch {
+    res.json({ present: true, fixtures: [] });
+  }
 });
 
 // List all shows (excludes archived)
@@ -118,8 +199,27 @@ app.get('/api/shows/:showName', (req, res) => {
 // Create or update show metadata
 app.post('/api/shows/:showName', (req, res) => {
   const { showName } = req.params;
+  const isNew    = !loadShow(showName);
   const existing = loadShow(showName) ?? { name: showName, sequences: [], createdAt: new Date().toISOString() };
   const updated  = { ...existing, ...req.body, name: showName, updatedAt: new Date().toISOString() };
+
+  // Brand-new show: seed it with the admin's default .qxw template if one exists
+  if (isNew && !updated.qxwPath) {
+    const s = loadSettings();
+    if (s.defaultQxwPath && fs.existsSync(s.defaultQxwPath)) {
+      try {
+        const uploadsDir = path.join(showPath(showName), 'uploads');
+        fs.mkdirSync(uploadsDir, { recursive: true });
+        const dest = path.join(uploadsDir, 'template.qxw');
+        fs.copyFileSync(s.defaultQxwPath, dest);
+        updated.qxwPath  = dest;
+        updated.fixtures = extractFixtures(parseQxw(dest));
+      } catch (e) {
+        console.error('Template seed failed:', e.message);
+      }
+    }
+  }
+
   saveShow(showName, updated);
   res.json(updated);
 });
@@ -170,8 +270,16 @@ app.post('/api/shows/:showName/audio', upload.single('audio'), (req, res) => {
   });
 });
 
-// Serve uploaded audio files
-app.use('/shows', express.static(SHOWS_DIR));
+// Serve uploaded audio files.
+// Uploads are content-addressed by filename and effectively immutable, so we
+// cache aggressively — this was causing a full re-download of every audio file
+// each time a show page was opened.
+app.use('/shows', express.static(SHOWS_DIR, {
+  maxAge:    '30d',
+  etag:      true,
+  lastModified: true,
+  immutable: true,
+}));
 
 // ── Sequences CRUD ───────────────────────────────────────────────────────────
 
@@ -228,6 +336,7 @@ app.post('/api/shows/:showName/archive', (req, res) => {
   const dst = path.join(ARCHIVE_DIR, showName);
   if (fs.existsSync(dst)) fs.rmSync(dst, { recursive: true, force: true });
   fs.renameSync(src, dst);
+  invalidateShow(showName);
   res.json({ ok: true });
 });
 
@@ -254,6 +363,7 @@ app.post('/api/archive/:showName/restore', requireAdmin, (req, res) => {
   const dst = showPath(showName);
   if (fs.existsSync(dst)) return res.status(409).json({ error: 'A show with that name already exists' });
   fs.renameSync(src, dst);
+  invalidateShow(showName);
   res.json({ ok: true });
 });
 
@@ -325,6 +435,40 @@ app.post('/api/shows/:showName/sequences/:seqId/copy', (req, res) => {
   dstShow.updatedAt = new Date().toISOString();
   saveShow(targetShow, dstShow);
   res.json(copy);
+});
+
+// ── Serve the exported .qxw for a show (used by Show Player auto-launch) ────
+// Re-exports on demand so the file is always current, then streams it.
+app.get('/api/shows/:showName/qxw-file', (req, res) => {
+  const { showName } = req.params;
+  const show = loadShow(showName);
+  if (!show)          return res.status(404).json({ error: 'Show not found' });
+  if (!show.qxwPath)  return res.status(400).json({ error: 'No .qxw uploaded for this show' });
+  if (!fs.existsSync(show.qxwPath)) return res.status(400).json({ error: 'Source .qxw missing' });
+
+  const fixtures = show.fixtures ?? [];
+  const fixtureRoles = show.fixtureRoles ?? {
+    par:  fixtures.find(f => f.model?.toLowerCase().includes('rgb'))?.id ?? fixtures[1]?.id,
+    spot: fixtures.find(f => f.model?.toLowerCase().includes('beam') || f.model?.toLowerCase().includes('spot'))?.id ?? fixtures[0]?.id,
+  };
+  const outPath = path.join(showPath(showName), `${showName.replace(/\s+/g, '_')}.qxw`);
+
+  try {
+    const result = mergeAndWrite(show.qxwPath, outPath, show.sequences ?? [], fixtureRoles, showName);
+    if (result.seqIdMap && Object.keys(result.seqIdMap).length > 0) {
+      const updated = loadShow(showName);
+      if (updated) {
+        updated.sequences = (updated.sequences ?? []).map(s => ({
+          ...s, qlcFunctionId: result.seqIdMap[s.id] ?? s.qlcFunctionId,
+        }));
+        updated.updatedAt = new Date().toISOString();
+        saveShow(showName, updated);
+      }
+    }
+    res.sendFile(outPath);
+  } catch (e) {
+    res.status(500).json({ error: 'Export failed: ' + e.message });
+  }
 });
 
 // ── Export ───────────────────────────────────────────────────────────────────

@@ -55,12 +55,48 @@ export default function AdminPanel({ onBack }) {
   const [saving,   setSaving]   = useState(false);
   const [msg,      setMsg]      = useState('');
   const [copyName, setCopyName] = useState({});  // showName → newName
+  const [template, setTemplate] = useState(null);
+  const [pinCur,   setPinCur]   = useState('');
+  const [pinNew,   setPinNew]   = useState('');
+  const [pinMsg,   setPinMsg]   = useState('');
 
   useEffect(() => {
     if (!token) return;
     fetch('/api/settings').then(r => r.json()).then(setSettings);
-    fetch('/api/archive', { headers: adminHeaders() }).then(r => r.json()).then(setArchive).catch(() => {});
+    fetch('/api/archive',        { headers: adminHeaders() }).then(r => r.json()).then(setArchive).catch(() => {});
+    fetch('/api/admin/template', { headers: adminHeaders() }).then(r => r.json()).then(setTemplate).catch(() => {});
   }, [token]);
+
+  async function uploadTemplate(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    const fd = new FormData();
+    fd.append('qxw', file);
+    const res = await fetch('/api/admin/template', {
+      method: 'POST',
+      headers: { 'x-admin-token': localStorage.getItem(TOKEN_KEY) ?? '' },
+      body: fd,
+    });
+    const data = await res.json();
+    if (!res.ok) { setMsg('✗ ' + (data.error ?? 'Upload failed')); }
+    else { setTemplate({ present: true, fixtures: data.fixtures }); setMsg('✓ Template saved'); }
+    setTimeout(() => setMsg(''), 3000);
+  }
+
+  async function changePin(e) {
+    e.preventDefault();
+    setPinMsg('');
+    const res = await fetch('/api/admin/pin', {
+      method: 'POST',
+      headers: adminHeaders(),
+      body: JSON.stringify({ currentPin: pinCur, newPin: pinNew }),
+    });
+    const data = await res.json();
+    if (!res.ok) { setPinMsg('✗ ' + (data.error ?? 'Failed')); return; }
+    setPinCur(''); setPinNew('');
+    setPinMsg('✓ PIN changed');
+    setTimeout(() => setPinMsg(''), 3000);
+  }
 
   async function saveSettings() {
     setSaving(true);
@@ -143,13 +179,49 @@ export default function AdminPanel({ onBack }) {
             </div>
           </label>
 
-          <button className="btn-primary" onClick={saveSettings} disabled={saving} style={{ marginTop: 20 }}>
+          <button className="btn-primary" onClick={saveSettings} disabled={saving}>
             {saving ? 'Saving…' : 'Save settings'}
           </button>
 
-          <div className="admin-pin-note">
-            To change the admin PIN, set the <code>ADMIN_PIN</code> environment variable on the server and restart.
+          {/* Default .qxw template */}
+          <h3 className="admin-section-title" style={{ marginTop: 36 }}>Default QLC+ template</h3>
+          <p className="admin-field-hint" style={{ marginBottom: 10 }}>
+            Automatically attached to every new show, so users never have to upload a .qxw themselves.
+          </p>
+          <div className="admin-template-row">
+            <label className="btn-secondary file-btn">
+              {template?.present ? 'Replace template' : 'Upload .qxw template'}
+              <input type="file" accept=".qxw" hidden onChange={uploadTemplate} />
+            </label>
+            {template?.present && (
+              <span className="admin-template-status">
+                ✓ Template loaded
+                {template.fixtures?.length > 0 && ` — ${template.fixtures.length} fixture${template.fixtures.length !== 1 ? 's' : ''}`}
+              </span>
+            )}
           </div>
+          {template?.fixtures?.length > 0 && (
+            <div className="fixture-badges" style={{ marginTop: 10 }}>
+              {template.fixtures.map(f => (
+                <span key={f.id} className="fixture-badge" title={`ID:${f.id}  DMX:${f.address + 1}  ${f.channels}ch`}>{f.name}</span>
+              ))}
+            </div>
+          )}
+
+          {/* Change PIN */}
+          <h3 className="admin-section-title" style={{ marginTop: 36 }}>Change admin PIN</h3>
+          <form onSubmit={changePin} className="admin-pin-form">
+            <input
+              className="input" type="password" placeholder="Current PIN"
+              value={pinCur} onChange={e => setPinCur(e.target.value)}
+            />
+            <input
+              className="input" type="password" placeholder="New PIN (min 4)"
+              value={pinNew} onChange={e => setPinNew(e.target.value)}
+            />
+            <button className="btn-secondary" disabled={!pinCur || pinNew.length < 4}>Update PIN</button>
+            {pinMsg && <span className={pinMsg.startsWith('✓') ? 'admin-msg' : 'admin-error'}>{pinMsg}</span>}
+          </form>
         </div>
       )}
 

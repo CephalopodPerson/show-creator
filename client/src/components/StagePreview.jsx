@@ -1,0 +1,114 @@
+import React, { useMemo } from 'react';
+
+// ── Stage light simulation ────────────────────────────────────────────────────
+// Layout mirrors the real rig: two Par wash lights on either side, one moving
+// head spot centred between them. Renders the state of whichever step is
+// active at `time`, so it doubles as a scrubbable preview.
+
+function rgbaFrom(c = {}, gain = 1) {
+  const b   = (c.brightness ?? 100) / 100;
+  const lum = (c.w ?? 0) * 0.35 + (c.a ?? 0) * 0.2;
+  const r   = Math.min(255, (c.r ?? 0) + lum);
+  const g   = Math.min(255, (c.g ?? 0) + lum * 0.75);
+  const bl  = Math.min(255, (c.b ?? 0) + lum * 0.5 + (c.uv ?? 0) * 0.6);
+  return { r, g: g, b: bl, alpha: Math.min(1, b * gain) };
+}
+
+function css({ r, g, b }, a) { return `rgba(${Math.round(r)},${Math.round(g)},${Math.round(b)},${a})`; }
+
+export default function StagePreview({ steps = [], time = 0, playing = false }) {
+  const active = useMemo(() => {
+    const sorted = [...steps].sort((a, b) => a.time_s - b.time_s);
+    return sorted.find(s => time >= s.time_s && time < s.time_s + s.duration_s)
+        ?? sorted.filter(s => s.time_s <= time).pop()
+        ?? null;
+  }, [steps, time]);
+
+  const parOn  = active && active.parEnabled  !== false;
+  const spotOn = active && active.spotEnabled !== false;
+
+  const par  = rgbaFrom(active?.par  ?? {});
+  const spot = rgbaFrom(active?.spot ?? {});
+
+  const strobe = (active?.par?.strobe ?? 0) > 0 && playing;
+
+  // Fade-in progress within the current step, so the preview animates
+  const intoStep = active ? time - active.time_s : 0;
+  const fadeIn   = active?.fade_in_s ?? 0;
+  const fadeGain = fadeIn > 0 ? Math.min(1, intoStep / fadeIn) : 1;
+
+  const parA  = parOn  ? par.alpha  * fadeGain : 0;
+  const spotA = spotOn ? spot.alpha * fadeGain : 0;
+
+  return (
+    <div className="stage-preview">
+      <div className="stage-preview-label">
+        Stage preview
+        {active?.memo && <span className="stage-memo">{active.memo}</span>}
+      </div>
+
+      <div className={`stage-box${strobe ? ' stage-strobe' : ''}`}>
+        {/* Ambient wash from both pars filling the room */}
+        <div className="stage-ambient" style={{
+          background: `radial-gradient(ellipse at 50% 120%, ${css(par, parA * 0.35)} 0%, transparent 70%)`,
+        }} />
+
+        {/* Left par beam */}
+        <div className="stage-beam stage-beam-left" style={{
+          background: `linear-gradient(to bottom right, ${css(par, parA * 0.55)} 0%, transparent 75%)`,
+        }} />
+        {/* Right par beam */}
+        <div className="stage-beam stage-beam-right" style={{
+          background: `linear-gradient(to bottom left, ${css(par, parA * 0.55)} 0%, transparent 75%)`,
+        }} />
+
+        {/* Centre moving-head spot cone */}
+        <div className="stage-spot-cone" style={{
+          background: `linear-gradient(to bottom, ${css(spot, spotA * 0.75)} 0%, ${css(spot, spotA * 0.15)} 60%, transparent 100%)`,
+        }} />
+        {/* Pool of light on the floor under the spot */}
+        <div className="stage-spot-pool" style={{
+          background: `radial-gradient(ellipse, ${css(spot, spotA * 0.7)} 0%, transparent 70%)`,
+        }} />
+
+        {/* Fixture bodies */}
+        <div className="fixture fixture-par fixture-par-left">
+          <div className="fixture-lens" style={{ background: css(par, Math.max(0.08, parA)), boxShadow: parA > 0.05 ? `0 0 18px 4px ${css(par, parA * 0.8)}` : 'none' }} />
+          <span className="fixture-tag">PAR L</span>
+        </div>
+
+        <div className="fixture fixture-spot">
+          <div className="fixture-head" style={{ background: css(spot, Math.max(0.08, spotA)), boxShadow: spotA > 0.05 ? `0 0 22px 6px ${css(spot, spotA * 0.85)}` : 'none' }} />
+          <span className="fixture-tag">SPOT</span>
+        </div>
+
+        <div className="fixture fixture-par fixture-par-right">
+          <div className="fixture-lens" style={{ background: css(par, Math.max(0.08, parA)), boxShadow: parA > 0.05 ? `0 0 18px 4px ${css(par, parA * 0.8)}` : 'none' }} />
+          <span className="fixture-tag">PAR R</span>
+        </div>
+
+        {/* Stage floor line */}
+        <div className="stage-floor" />
+      </div>
+
+      <div className="stage-readout">
+        {active ? (
+          <>
+            <span className="stage-chip">
+              <span className="stage-swatch" style={{ background: css(par, Math.max(0.15, parA)) }} />
+              Par {parOn ? `${active.par?.brightness ?? 100}%` : 'off'}
+            </span>
+            <span className="stage-chip">
+              <span className="stage-swatch" style={{ background: css(spot, Math.max(0.15, spotA)) }} />
+              Spot {spotOn ? `${active.spot?.brightness ?? 100}%` : 'off'}
+            </span>
+            {(active.par?.strobe ?? 0) > 0 && <span className="stage-chip">⚡ Strobe {active.par.strobe}</span>}
+            <span className="stage-chip stage-chip-dim">Step at {active.time_s}s · {active.duration_s}s</span>
+          </>
+        ) : (
+          <span className="stage-chip stage-chip-dim">No step at this time</span>
+        )}
+      </div>
+    </div>
+  );
+}

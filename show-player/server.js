@@ -47,6 +47,88 @@ app.post('/qlc', async (req, res) => {
   }
 });
 
+// ── Launch QLC+ with web server enabled, optionally loading a workspace ──────
+// POST /launch-qlc  { exePath?, qxwUrl?, showName? }
+// Downloads the .qxw from the VPS (if given) then spawns:
+//   qlcplus.exe -w -o <file> -p
+const { spawn }  = require('child_process');
+const os         = require('os');
+const fsp        = require('fs/promises');
+const fsSync     = require('fs');
+const pathMod    = require('path');
+
+// Common install locations to probe when the user hasn't set one
+const QLC_GUESSES = [
+  'C:\\QLC+\\qlcplus.exe',
+  'C:\\Program Files\\QLC+\\qlcplus.exe',
+  'C:\\Program Files (x86)\\QLC+\\qlcplus.exe',
+  '/usr/bin/qlcplus',
+  '/Applications/QLC+.app/Contents/MacOS/qlcplus',
+];
+
+app.get('/find-qlc', (req, res) => {
+  const found = QLC_GUESSES.find(p => { try { return fsSync.existsSync(p); } catch { return false; } });
+  res.json({ found: found ?? null, candidates: QLC_GUESSES });
+});
+
+app.post('/launch-qlc', async (req, res) => {
+  const { exePath, qxwUrl, showName, operate = true } = req.body;
+
+  const exe = exePath || QLC_GUESSES.find(p => { try { return fsSync.existsSync(p); } catch { return false; } });
+  if (!exe) return res.status(400).json({ error: 'QLC+ executable not found — set the path in Settings' });
+  if (!fsSync.existsSync(exe)) return res.status(400).json({ error: `Not found: ${exe}` });
+
+  const args = ['-w'];   // always enable the web API
+
+  // Download the workspace file locally so QLC+ can open it
+  let localQxw = null;
+  if (qxwUrl) {
+    try {
+      const r = await fetch(qxwUrl);
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const buf = Buffer.from(await r.arrayBuffer());
+      const dir = pathMod.join(os.tmpdir(), 'show-player');
+      await fsp.mkdir(dir, { recursive: true });
+      localQxw = pathMod.join(dir, `${(showName || 'show').replace(/[^\w.-]+/g, '_')}.qxw`);
+      await fsp.writeFile(localQxw, buf);
+      args.push('-o', localQxw);
+    } catch (e) {
+      return res.status(502).json({ error: `Could not download workspace: ${e.message}` });
+    }
+  }
+
+  if (operate) args.push('-p');   // start in Operate mode
+
+  try {
+    const child = spawn(exe, args, { detached: true, stdio: 'ignore' });
+    child.unref();
+    res.json({ ok: true, exe, args, workspace: localQxw });
+  } catch (e) {
+    res.status(500).json({ error: `Launch failed: ${e.message}` });
+  }
+});
+
+// ── LEDfx proxy ──────────────────────────────────────────────────────────────
+// The VPS can't reach the venue LAN, so all LEDfx calls route through here.
+// POST /ledfx  { host, port, method, path, body? }
+app.post('/ledfx', async (req, res) => {
+  const { host = '127.0.0.1', port = 8888, method = 'GET', path: apiPath = '/api/effects', body } = req.body;
+  const url = `http://${host}:${port}${apiPath}`;
+  try {
+    const r = await fetch(url, {
+      method,
+      headers: { 'Content-Type': 'application/json' },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    const text = await r.text();
+    let parsed; try { parsed = JSON.parse(text); } catch { parsed = text; }
+    if (!r.ok) return res.status(502).json({ error: `LedFx returned ${r.status}`, detail: parsed });
+    res.json({ ok: true, data: parsed });
+  } catch (e) {
+    res.status(500).json({ error: `Could not reach LedFx at ${host}:${port} — is it running?` });
+  }
+});
+
 app.listen(PORT, '127.0.0.1', () =>
-  console.log(`Show Player QLC+ bridge running on port ${PORT}`)
+  console.log(`Show Player bridge running on port ${PORT}`)
 );

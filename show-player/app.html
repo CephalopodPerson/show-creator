@@ -54,6 +54,9 @@ body { background: #0f0f13; color: #e0e0e0; font-family: 'Segoe UI', system-ui, 
 .show-card { background: #16161e; border: 1px solid #2a2a36; border-radius: 8px; overflow: hidden; margin-bottom: 10px; }
 .show-card-header { width: 100%; display: flex; align-items: center; gap: 12px; padding: 12px 16px; background: none; border: none; color: inherit; cursor: pointer; text-align: left; }
 .show-card-header:hover { background: #1e1e28; }
+.show-card-top { display: flex; align-items: center; }
+.btn-launch { background: #2a1a3a; color: #c48aff; border: 1px solid #4a2a6a; padding: 6px 14px; border-radius: 5px; cursor: pointer; font-size: 12px; white-space: nowrap; margin-right: 12px; flex-shrink: 0; }
+.btn-launch:hover { background: #3a2450; }
 .show-card-name { font-weight: 600; font-size: 15px; flex: 1; }
 .show-card-meta { font-size: 12px; color: #555; }
 .show-card-chevron { color: #444; font-size: 11px; transition: transform 0.15s; }
@@ -98,7 +101,12 @@ body { background: #0f0f13; color: #e0e0e0; font-family: 'Segoe UI', system-ui, 
     <span class="config-label">QLC+ host</span>
     <input class="config-input" id="qlcHost" placeholder="127.0.0.1" style="max-width:200px" />
   </div>
-  <div class="config-hint">VPS URL is where Show Creator is hosted. QLC+ host is where QLC+ is running (usually 127.0.0.1). Make sure QLC+ web server is enabled on port 9999 (Settings → Enable web interface).</div>
+  <div class="config-row">
+    <span class="config-label">QLC+ exe path</span>
+    <input class="config-input" id="qlcExe" placeholder="C:\QLC+\qlcplus.exe" />
+    <button class="btn-connect" onclick="autoFindQlc()">Auto-find</button>
+  </div>
+  <div class="config-hint">VPS URL is where Show Creator is hosted. QLC+ host is where QLC+ runs (usually 127.0.0.1). Use <strong>Launch QLC+</strong> on a show to start it with the web API enabled and the workspace already loaded — no command line needed.</div>
 </div>
 
 <div class="now-playing" id="nowPlaying">
@@ -126,6 +134,7 @@ body { background: #0f0f13; color: #e0e0e0; font-family: 'Segoe UI', system-ui, 
 const BRIDGE_PORT = 3848;
 let vpsUrl        = localStorage.getItem('vpsUrl')  || '';
 let qlcHost       = localStorage.getItem('qlcHost') || '127.0.0.1';
+let qlcExe        = localStorage.getItem('qlcExe')  || '';
 let playing     = null;  // { seqId, funcId, duration }
 let timerHandle = null;
 let showData    = {};    // name → full show json
@@ -134,6 +143,7 @@ let expanded    = {};    // name → bool
 // ── Init ──────────────────────────────────────────────────────────────────────
 document.getElementById('vpsUrl').value  = vpsUrl;
 document.getElementById('qlcHost').value = qlcHost;
+document.getElementById('qlcExe').value  = qlcExe;
 
 if (vpsUrl) {
   loadShows();
@@ -149,10 +159,44 @@ function toggleConfig() {
 function saveAndConnect() {
   vpsUrl   = document.getElementById('vpsUrl').value.trim().replace(/\/$/, '');
   qlcHost  = document.getElementById('qlcHost').value.trim() || '127.0.0.1';
+  qlcExe   = document.getElementById('qlcExe').value.trim();
   localStorage.setItem('vpsUrl',   vpsUrl);
   localStorage.setItem('qlcHost',  qlcHost);
+  localStorage.setItem('qlcExe',   qlcExe);
   document.getElementById('configPanel').classList.remove('open');
   loadShows();
+}
+
+async function autoFindQlc() {
+  try {
+    const r = await fetch(`http://127.0.0.1:${BRIDGE_PORT}/find-qlc`).then(r => r.json());
+    if (r.found) {
+      document.getElementById('qlcExe').value = r.found;
+      setStatus('✓ Found QLC+ at ' + r.found, 'ok');
+    } else {
+      setStatus('⚠ QLC+ not found in the usual places — enter the path manually', 'warn');
+    }
+  } catch {
+    setStatus('⚠ Bridge not responding', 'err');
+  }
+}
+
+// ── Launch QLC+ with this show's workspace ───────────────────────────────────
+async function launchQlc(showName) {
+  setStatus('Launching QLC+…', '');
+  const qxwUrl = `${vpsUrl}/api/shows/${encodeURIComponent(showName)}/qxw-file`;
+  try {
+    const res = await fetch(`http://127.0.0.1:${BRIDGE_PORT}/launch-qlc`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ exePath: qlcExe || undefined, qxwUrl, showName }),
+    });
+    const data = await res.json();
+    if (!res.ok) { setStatus('⚠ ' + (data.error ?? 'Launch failed'), 'err'); return; }
+    setStatus('🚀 QLC+ launched with workspace loaded — give it a few seconds', 'ok');
+  } catch (e) {
+    setStatus('⚠ Bridge not responding: ' + e.message, 'err');
+  }
 }
 
 // ── Load shows ────────────────────────────────────────────────────────────────
@@ -189,11 +233,14 @@ function renderShows(shows) {
     card.className = 'show-card';
     card.id = 'card-' + s.name;
     card.innerHTML = `
-      <button class="show-card-header" onclick="toggleShow('${esc(s.name)}')">
-        <span class="show-card-name">${esc(s.name)}</span>
-        <span class="show-card-meta">${s.sequences} sequence${s.sequences !== 1 ? 's' : ''}</span>
-        <span class="show-card-chevron" id="chev-${esc(s.name)}">▼</span>
-      </button>
+      <div class="show-card-top">
+        <button class="show-card-header" onclick="toggleShow('${esc(s.name)}')">
+          <span class="show-card-name">${esc(s.name)}</span>
+          <span class="show-card-meta">${s.sequences} sequence${s.sequences !== 1 ? 's' : ''}</span>
+          <span class="show-card-chevron" id="chev-${esc(s.name)}">▼</span>
+        </button>
+        <button class="btn-launch" onclick="launchQlc('${esc(s.name)}')" title="Launch QLC+ with this show's workspace loaded and web API enabled">🚀 Launch QLC+</button>
+      </div>
       <div class="seq-list" id="seqs-${esc(s.name)}" style="display:none"></div>
     `;
     area.appendChild(card);

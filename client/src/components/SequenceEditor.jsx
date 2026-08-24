@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import WaveformPlayer from './WaveformPlayer';
 import Timeline, { RULER_H, TRACK_H, MEMO_H } from './Timeline';
 import StepPanel from './StepPanel';
+import StagePreview from './StagePreview';
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 const WAVEFORM_H  = 88;
@@ -237,25 +238,52 @@ export default function SequenceEditor({ sequence, showName, fixtures, onSave, m
         return rms.slice(lo, hi + 1).reduce((a, b) => a + b, 0) / (hi - lo + 1);
       });
 
-      // Aggressiveness controls:
-      //   1 = only huge drops (threshold 2.5×, look-back 4s, min gap 20s)
-      //   5 = catch all changes (threshold 1.3×, look-back 1s, min gap 4s)
-      const aggr     = wizardAggr;
-      const threshold = 2.5 - (aggr - 1) * 0.3;           // 2.5 → 1.3
-      const lookBack  = Math.round((4 - (aggr - 1) * 0.6) / WINDOW_S); // 4s → 1.6s
-      const minGapS   = Math.max(wizardMinLen, 20 - (aggr - 1) * 4);   // 20s → 4s
+      // Aggressiveness controls how sensitive we are to change.
+      //   1 = only major drops   … 5 = follows the track closely
+      // Thresholds are much lower than the first pass — the old 2.5× floor
+      // meant anything below "intense" found almost nothing.
+      const aggr      = wizardAggr;
+      const threshold = [1.55, 1.38, 1.25, 1.15, 1.08][aggr - 1];
+      const lookBack  = Math.round([3.0, 2.5, 2.0, 1.5, 1.0][aggr - 1] / WINDOW_S);
       const lookAhead = Math.round(0.5 / WINDOW_S);
+      // Target section length drives the min gap, floored by the user's setting
+      const targetGap = [22, 16, 11, 7, 4][aggr - 1];
+      const minGapS   = Math.max(wizardMinLen, targetGap);
 
-      const splitPoints = [0]; // always start at 0
+      // Collect every candidate transition with its strength, then keep the
+      // strongest ones that respect minGapS. Ranking by strength (rather than
+      // taking the first hit and skipping ahead) means we land on the *biggest*
+      // moment in each region instead of whatever happened to come first.
+      const peakRms = Math.max(...smooth, 0.0001);
+      const cands = [];
       for (let i = lookBack; i < smooth.length - lookAhead; i++) {
         const before = smooth.slice(Math.max(0, i - lookBack), i).reduce((a, b) => a + b, 0) / lookBack;
         const after  = smooth.slice(i, Math.min(smooth.length, i + lookAhead)).reduce((a, b) => a + b, 0) / lookAhead;
-        const t      = i * WINDOW_S;
-        if (before > 0.0003 && after > before * threshold) {
-          const lastT = splitPoints[splitPoints.length - 1];
-          if (t - lastT >= minGapS) splitPoints.push(parseFloat(t.toFixed(2)));
+        if (before < 0.00005) continue;
+        const ratio = after / before;
+        // Both rises and drops are interesting — a breakdown matters as much as a drop
+        const strength = Math.max(ratio, 1 / Math.max(ratio, 0.0001));
+        if (strength >= threshold) {
+          cands.push({ t: parseFloat((i * WINDOW_S).toFixed(2)), strength, rising: ratio >= 1 });
         }
       }
+      cands.sort((a, b) => b.strength - a.strength);
+
+      const chosen = [];
+      for (const c of cands) {
+        if (chosen.every(x => Math.abs(x.t - c.t) >= minGapS)) chosen.push(c);
+      }
+
+      // Fallback: if the track is very even and we found nothing, divide it
+      // evenly so the wizard always produces a usable starting point.
+      if (chosen.length === 0) {
+        const n = Math.max(2, Math.min(12, Math.floor(decoded.duration / Math.max(minGapS, 8))));
+        for (let k = 1; k < n; k++) chosen.push({ t: parseFloat((decoded.duration * k / n).toFixed(2)), strength: 1, rising: true });
+      }
+
+      const splitPoints = [0, ...chosen.map(c => c.t)]
+        .filter((t, i, arr) => arr.indexOf(t) === i)
+        .sort((a, b) => a - b);
 
       // Build steps from split points
       const totalDur = parseFloat(decoded.duration.toFixed(2));
@@ -590,6 +618,9 @@ export default function SequenceEditor({ sequence, showName, fixtures, onSave, m
           </div>
         </div>
       </div>
+
+      {/* ── Stage preview ── */}
+      <StagePreview steps={steps} time={currentTime} playing={playing} />
 
       {/* ── Step panel ── */}
       {selected && (
