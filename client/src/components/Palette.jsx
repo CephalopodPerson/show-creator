@@ -313,7 +313,7 @@ export default function PaletteSidebar({
       <div className="side-section">
         <div className="side-title">Tempo</div>
         <div className="bpm-row">
-          <span className="bpm-value">{bpm ? `${bpm} BPM` : '—'}</span>
+          <span className="bpm-value">{bpm ? `${bpm} BPM` : detecting ? '…' : '—'}</span>
           {bpm != null && bpmConfidence != null && (
             <span className={`bpm-conf${bpmConfidence < 0.35 ? ' bpm-conf-low' : ''}`}>
               {bpmConfidence < 0.35 ? 'low confidence' : `${Math.round(bpmConfidence * 100)}%`}
@@ -321,9 +321,11 @@ export default function PaletteSidebar({
           )}
         </div>
         <button className="tool-btn" onClick={onDetectBpm} disabled={detecting} type="button">
-          {detecting ? 'Listening…' : bpm ? '↻ Re-detect' : '♪ Detect beat'}
+          {detecting ? 'Listening…' : '↻ Re-detect'}
         </button>
-        <div className="side-hint">Pulse and strobe lock to this tempo</div>
+        <div className="side-hint">
+          {detecting ? 'Analyzing the track…' : 'Detected automatically — pulse and strobe lock to it'}
+        </div>
       </div>
 
       {/* Edit tools */}

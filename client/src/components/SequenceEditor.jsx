@@ -70,6 +70,13 @@ export default function SequenceEditor({ sequence, showName, fixtures, onSave, s
   const { bump, topColors, topEffects } = useUsage();
   const { custom, addColor, removeColor } = useCustomColors();
 
+  // Held in a ref so the tempo effect can persist without depending on `steps`,
+  // which would otherwise re-trigger detection on every edit.
+  const onSaveRef = useRef(null);
+  useEffect(() => {
+    onSaveRef.current = (patch) => onSave({ ...sequence, steps, audioPath, ...patch });
+  });
+
   const saveTimer = useRef(null);
   const scrollRef = useRef(null);
   const wsRef     = useRef(null);
@@ -106,6 +113,43 @@ export default function SequenceEditor({ sequence, showName, fixtures, onSave, s
     }
   // eslint-disable-next-line
   }, [audioDur]);
+
+  // ── Auto-detect tempo on load ──
+  // Fires once per audio file. The result is persisted on the sequence, so
+  // reopening a song reuses it rather than decoding the file again.
+  const bpmForPath = useRef(null);
+  useEffect(() => {
+    if (!audioPath) return;
+    if (bpmForPath.current === audioPath) return;              // already handled this file
+    if (bpm && sequence.audioPath === audioPath) {             // saved from a previous session
+      bpmForPath.current = audioPath;
+      return;
+    }
+
+    let cancelled = false;
+    bpmForPath.current = audioPath;
+    (async () => {
+      setDetecting(true);
+      try {
+        const buf = await (await fetch(u(audioPath))).arrayBuffer();
+        if (cancelled) return;
+        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+        const decoded = await ctx.decodeAudioData(buf);
+        ctx.close();
+        if (cancelled) return;
+        const { bpm: found, confidence } = detectTempo(decoded);
+        setBpm(found);
+        setBpmConf(confidence);
+        onSaveRef.current?.({ bpm: found, bpmConfidence: confidence });
+      } catch {
+        // Not fatal — effects fall back to a free-running rate
+      }
+      if (!cancelled) setDetecting(false);
+    })();
+
+    return () => { cancelled = true; };
+  // eslint-disable-next-line
+  }, [audioPath]);
 
   // ── Step mutations ──
   const updateStep = useCallback((id, patch) => {
@@ -146,7 +190,7 @@ export default function SequenceEditor({ sequence, showName, fixtures, onSave, s
       const { bpm: found, confidence } = detectTempo(decoded);
       setBpm(found);
       setBpmConf(confidence);
-      onSave({ ...sequence, steps, bpm: found, bpmConfidence: confidence });
+      onSaveRef.current?.({ bpm: found, bpmConfidence: confidence });
     } catch (err) {
       setWarnings(w => [...w, `Beat detection failed: ${err.message}`]);
     }
