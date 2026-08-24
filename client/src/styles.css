@@ -673,3 +673,86 @@ body { background: #0f0f13; color: #e0e0e0; font-family: 'Segoe UI', system-ui, 
 .admin-template-status { font-size: 12px; color: #4caf50; }
 .admin-pin-form { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .admin-pin-form .input { max-width: 170px; }
+
+/* ── Grid editor ── */
+.grid-editor { display: flex; flex-direction: column; gap: 12px; padding: 14px 16px; overflow: hidden; }
+.grid-empty { padding: 30px; text-align: center; }
+
+/* Palette */
+.palette { display: flex; gap: 24px; flex-wrap: wrap; background: #14141c; border: 1px solid #23232e; border-radius: 9px; padding: 12px 14px; }
+.palette-group { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.palette-label { font-size: 11px; color: #666; text-transform: uppercase; letter-spacing: 0.6px; display: flex; align-items: baseline; gap: 8px; }
+.palette-hint { text-transform: none; letter-spacing: 0; color: #4a9eff; font-size: 11px; }
+.palette-chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.chip { border: 2px solid transparent; border-radius: 7px; cursor: pointer; padding: 0; position: relative; transition: transform 0.12s, border-color 0.12s; }
+.chip:hover { transform: translateY(-2px); }
+.chip-armed { border-color: #fff !important; box-shadow: 0 0 12px rgba(255,255,255,0.4); }
+.chip-color { width: 56px; height: 40px; display: flex; align-items: flex-end; justify-content: center; padding-bottom: 3px; }
+.chip-color .chip-label { font-size: 9px; font-weight: 700; color: #fff; text-shadow: 0 1px 3px rgba(0,0,0,0.9); }
+.chip-effect { width: 62px; height: 40px; background: #1e1e2a; border: 2px solid #2e2e3e; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; color: #bbb; }
+.chip-effect:hover { background: #26263a; }
+.chip-icon { font-size: 14px; line-height: 1; }
+.chip-effect .chip-label { font-size: 9px; color: #999; }
+.palette-bright { display: flex; align-items: center; gap: 8px; font-size: 11px; color: #888; }
+.palette-bright input { flex: 1; min-width: 90px; accent-color: #f5c518; }
+.palette-bright-val { color: #ccc; min-width: 34px; text-align: right; }
+
+/* Grid */
+.grid-scroll { overflow-x: auto; overflow-y: hidden; padding-bottom: 4px; }
+.grid-rows { display: flex; flex-direction: column; gap: 4px; min-width: min-content; }
+.grid-row { display: flex; gap: 4px; align-items: stretch; }
+.grid-rowlabel { width: 62px; flex-shrink: 0; font-size: 10px; color: #777; display: flex; flex-direction: column; justify-content: center; letter-spacing: 0.5px; font-weight: 600; }
+.grid-rowlabel-sub { font-size: 8px; color: #444; font-weight: 400; letter-spacing: 0; }
+.grid-head { width: 84px; flex-shrink: 0; background: #1a1a24; border: 1px solid #26263a; border-radius: 6px; padding: 5px 6px; cursor: pointer; display: flex; flex-direction: column; gap: 1px; }
+.grid-head:hover { background: #22222e; }
+.grid-head-now { border-color: #4caf50; }
+.grid-head-sel { border-color: #4a9eff; background: #1a2436; }
+.grid-head-num  { font-size: 9px; color: #555; }
+.grid-head-time { font-size: 12px; color: #ddd; font-family: monospace; }
+.grid-head-dur  { font-size: 9px; color: #666; }
+.grid-cell { width: 84px; height: 46px; flex-shrink: 0; border: 1px solid #26263a; border-radius: 6px; cursor: pointer; transition: transform 0.1s, border-color 0.1s; padding: 0; }
+.grid-cell:hover { transform: scale(1.04); border-color: #4a4a5e; }
+.grid-cell-sel { border-color: #4a9eff !important; }
+.grid-cell-fx { background: #16161e; display: flex; align-items: center; justify-content: center; gap: 4px; flex-wrap: wrap; }
+.fx-badge { font-size: 14px; color: #c48aff; background: #2a1a3a; border-radius: 4px; padding: 1px 5px; cursor: pointer; }
+.fx-badge:hover { background: #4a2a6a; }
+.fx-empty { color: #333; font-size: 16px; }
+.grid-row-tools .grid-tools { width: 84px; flex-shrink: 0; display: flex; gap: 3px; justify-content: center; }
+.grid-tool { flex: 1; background: #1a1a24; border: 1px solid #26263a; color: #666; border-radius: 4px; cursor: pointer; font-size: 11px; padding: 2px 0; }
+.grid-tool:hover:not(:disabled) { background: #26263a; color: #bbb; }
+.grid-tool:disabled { opacity: 0.3; cursor: not-allowed; }
+
+/* View toggle */
+.view-toggle { display: flex; gap: 2px; background: #1a1a24; border-radius: 6px; padding: 2px; }
+.view-btn { background: none; border: none; color: #777; padding: 5px 14px; border-radius: 5px; cursor: pointer; font-size: 12px; }
+.view-btn:hover { color: #bbb; }
+.view-btn-active { background: #2a3a52; color: #4a9eff; }
+
+/* ── Mobile ── */
+@media (max-width: 820px) {
+  .app-header { padding: 0 12px; flex-wrap: wrap; height: auto; min-height: 52px; gap: 8px; }
+  .logo { font-size: 15px; }
+  .show-editor { flex-direction: column; }
+  .show-editor > .seq-list { width: 100%; max-height: 34vh; border-right: none; border-bottom: 1px solid #2a2a36; }
+  .seq-editor-area { min-height: 0; }
+  .combined-timeline { display: none; }          /* timeline is desktop-only */
+  .grid-editor { padding: 10px; gap: 10px; }
+  .palette { gap: 14px; padding: 10px; }
+  .chip-color  { width: 46px; height: 36px; }
+  .chip-effect { width: 54px; height: 36px; }
+  .grid-rowlabel { width: 44px; font-size: 9px; }
+  .grid-head, .grid-cell, .grid-row-tools .grid-tools { width: 68px; }
+  .grid-cell { height: 52px; }                   /* taller = easier to tap */
+  .stage-box { height: 150px; }
+  .seq-editor-header { flex-wrap: wrap; gap: 6px; }
+  .seq-editor-header .btn-primary,
+  .seq-editor-header .btn-secondary { font-size: 12px; padding: 6px 10px; }
+  .card-grid { grid-template-columns: 1fr; }
+  .modal-box { width: 96vw; max-height: 88vh; }
+  .wizard-modal, .vibe-modal { width: 96vw; }
+}
+.steppanel-fx { display: flex; align-items: center; gap: 8px; padding: 0 16px 10px; flex-wrap: wrap; }
+.steppanel-fx-label { font-size: 11px; color: #666; text-transform: uppercase; letter-spacing: 0.6px; }
+.steppanel-fx-chip { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: #c48aff; background: #2a1a3a; border: 1px solid #4a2a6a; padding: 3px 8px; border-radius: 11px; }
+.steppanel-fx-x { background: none; border: none; color: #8a6aaa; cursor: pointer; font-size: 10px; padding: 0; }
+.steppanel-fx-x:hover { color: #fff; }

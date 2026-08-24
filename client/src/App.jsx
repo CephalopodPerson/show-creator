@@ -7,7 +7,7 @@ import './styles.css';
 export default function App() {
   const [view, setView]         = useState('list');     // 'list' | 'editor' | 'admin'
   const [showName, setShowName] = useState(null);
-  const [mode, setMode]         = useState('advanced'); // 'basic' | 'advanced'
+  const [editView, setEditView] = useState('grid');     // 'grid' | 'timeline'
 
   function openShow(name) { setShowName(name); setView('editor'); }
   function backToList()   { setShowName(null); setView('list'); }
@@ -27,15 +27,17 @@ export default function App() {
 
         <div className="header-right">
           {view === 'editor' && (
-            <div className="mode-toggle">
+            <div className="view-toggle">
               <button
-                className={`mode-btn${mode === 'basic' ? ' mode-btn-active' : ''}`}
-                onClick={() => setMode('basic')}
-              >Basic</button>
+                className={`view-btn${editView === 'grid' ? ' view-btn-active' : ''}`}
+                onClick={() => setEditView('grid')}
+                title="Grid — colour and effect blocks per section"
+              >▦ Grid</button>
               <button
-                className={`mode-btn${mode === 'advanced' ? ' mode-btn-active' : ''}`}
-                onClick={() => setMode('advanced')}
-              >Advanced</button>
+                className={`view-btn${editView === 'timeline' ? ' view-btn-active' : ''}`}
+                onClick={() => setEditView('timeline')}
+                title="Timeline — waveform and fine control"
+              >⎯ Timeline</button>
             </div>
           )}
         </div>
@@ -43,7 +45,7 @@ export default function App() {
 
       <main className="app-body">
         {view === 'list'   && <ShowList   onOpen={openShow} onAdmin={() => setView('admin')} />}
-        {view === 'editor' && <ShowEditor showName={showName} mode={mode} />}
+        {view === 'editor' && <ShowEditor showName={showName} view={editView} />}
         {view === 'admin'  && <AdminPanel onBack={backToList} />}
       </main>
     </div>

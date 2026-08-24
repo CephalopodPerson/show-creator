@@ -3,6 +3,7 @@ import WaveformPlayer from './WaveformPlayer';
 import Timeline, { RULER_H, TRACK_H, MEMO_H } from './Timeline';
 import StepPanel from './StepPanel';
 import StagePreview from './StagePreview';
+import GridEditor from './GridEditor';
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 const WAVEFORM_H  = 88;
@@ -88,7 +89,7 @@ const VIBES = {
 const DEFAULT_PAR  = { r: 180, g: 60, b: 0, w: 60, a: 40, uv: 0, strobe: 0, brightness: 45 };
 const DEFAULT_SPOT = { r: 200, g: 80, b: 10, w: 50, brightness: 45 };
 
-export default function SequenceEditor({ sequence, showName, fixtures, onSave, mode = 'advanced' }) {
+export default function SequenceEditor({ sequence, showName, fixtures, onSave, view = 'grid', settings = {} }) {
   const [steps,        setSteps]       = useState(sequence.steps ?? []);
   const [audioPath,    setAudioPath]   = useState(sequence.audioPath ?? null);
   const [audioDur,     setAudioDur]    = useState(sequence.audioDuration ?? 0);
@@ -196,8 +197,11 @@ export default function SequenceEditor({ sequence, showName, fixtures, onSave, m
     const sorted  = [...steps].sort((a, b) => a.time_s - b.time_s);
     const newSteps = sorted.map((step, i) => ({
       ...step,
-      par:  { ...palette[i % palette.length].par  },
-      spot: { ...palette[i % palette.length].spot },
+      color: {
+        par:  { ...palette[i % palette.length].par  },
+        spot: { ...palette[i % palette.length].spot },
+      },
+      par: undefined, spot: undefined,   // clear legacy fields
     }));
     updateSteps(newSteps);
     setShowVibes(false);
@@ -305,20 +309,30 @@ export default function SequenceEditor({ sequence, showName, fixtures, onSave, m
         const scalePar  = { ...colours.par,  brightness: Math.round(colours.par.brightness  * bScale) };
         const scaleSpot = { ...colours.spot, brightness: Math.round(colours.spot.brightness * bScale) };
 
-        // Fade in for first step, longer fades for calmer vibes
-        const fadeIn  = idx === 0 ? 0 : (aggr <= 2 ? 1.5 : aggr <= 3 ? 0.8 : 0.3);
+        // Calmer vibes get longer fades; aggressive ones snap
+        const fadeDur = aggr <= 2 ? 1.5 : aggr <= 3 ? 0.8 : 0.3;
         const fadeOut = idx === splitPoints.length - 1 ? 2 : 0;
+
+        // Effect layers the wizard chooses for you
+        const effects = [];
+        if (idx > 0) effects.push({ type: 'fade', direction: 'in', duration_s: fadeDur });
+        // On high-energy sections at higher aggressiveness, add movement
+        if (aggr >= 4 && energyPct > 0.75) {
+          effects.push({ type: 'flash', at: 0, duration_s: 0.12, repeat: 3, gap_s: 0.28 });
+        } else if (aggr >= 3 && energyPct > 0.6) {
+          effects.push({ type: 'pulse', rate_hz: 2, depth: 0.35 });
+        }
 
         return {
           id:          crypto.randomUUID(),
           time_s:      t,
           duration_s:  dur,
-          fade_in_s:   fadeIn,
+          fade_in_s:   idx === 0 ? 0 : fadeDur,
           fade_out_s:  fadeOut,
           parEnabled:  true,
           spotEnabled: true,
-          par:         scalePar,
-          spot:        scaleSpot,
+          color:       { par: scalePar, spot: scaleSpot },
+          effects,
           memo:        '',
         };
       });
@@ -569,8 +583,21 @@ export default function SequenceEditor({ sequence, showName, fixtures, onSave, m
       {/* ── Warnings ── */}
       {warnings.map((w, i) => <div key={i} className="warning-banner">⚠ {w}</div>)}
 
+      {/* ── Grid view ── */}
+      {view === 'grid' && (
+        <GridEditor
+          steps={steps}
+          onUpdateSteps={updateSteps}
+          onSelectStep={setSelectedStep}
+          selectedId={selectedStep}
+          currentTime={currentTime}
+          onSeek={t => { setCurrentTime(t); wsRef.current?.seek(t / duration); }}
+          maxBrightness={settings.maxBrightness ?? 100}
+        />
+      )}
+
       {/* ── Combined timeline ── */}
-      <div className="combined-timeline">
+      <div className="combined-timeline" style={view === 'grid' ? { display: 'none' } : undefined}>
 
         {/* Fixed left column: play button + track labels */}
         <div className="labels-col">
@@ -622,13 +649,13 @@ export default function SequenceEditor({ sequence, showName, fixtures, onSave, m
       {/* ── Stage preview ── */}
       <StagePreview steps={steps} time={currentTime} playing={playing} />
 
-      {/* ── Step panel ── */}
-      {selected && (
+      {/* ── Step panel — fine control for the selected section ── */}
+      {selected && view === 'timeline' && (
         <StepPanel
           step={selected}
           onChange={patch => updateStep(selected.id, patch)}
           onDelete={() => deleteStep(selected.id)}
-          mode={mode}
+          mode="advanced"
         />
       )}
 

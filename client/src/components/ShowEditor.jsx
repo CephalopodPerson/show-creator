@@ -3,7 +3,7 @@ import SequenceEditor from './SequenceEditor';
 
 const API = name => `/api/shows/${encodeURIComponent(name)}`;
 
-export default function ShowEditor({ showName, mode = 'advanced' }) {
+export default function ShowEditor({ showName, view = 'grid' }) {
   const [show,        setShow]        = useState(null);
   const [sequences,   setSequences]   = useState([]);
   const [active,      setActive]      = useState(null);
@@ -21,6 +21,7 @@ export default function ShowEditor({ showName, mode = 'advanced' }) {
 
   // Upload progress
   const [uploading,   setUploading]   = useState(false);
+  const [settings,    setSettings]    = useState({});
   const audioPickerRef = useRef(null);
 
   // Copy-to picker: id of sequence being copied, list of target shows
@@ -36,6 +37,11 @@ export default function ShowEditor({ showName, mode = 'advanced' }) {
     setToast({ msg, type });
     toastTimer.current = setTimeout(() => setToast(null), 3500);
   }
+
+  // Global settings (brightness cap etc.)
+  useEffect(() => {
+    fetch('/api/settings').then(r => r.json()).then(setSettings).catch(() => {});
+  }, []);
 
   // Load show on mount
   useEffect(() => {
@@ -393,7 +399,8 @@ export default function ShowEditor({ showName, mode = 'advanced' }) {
               showName={showName}
               fixtures={show?.fixtures ?? []}
               onSave={saveSequence}
-              mode={mode}
+              view={view}
+              settings={settings}
             />
           : <div className="empty-state">
               {sequences.length === 0

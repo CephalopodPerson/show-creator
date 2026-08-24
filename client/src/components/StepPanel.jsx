@@ -256,8 +256,26 @@ export default function StepPanel({ step, onChange, onDelete, mode = 'advanced' 
   const parEnabled  = step.parEnabled  !== false;   // default true
   const spotEnabled = step.spotEnabled !== false;   // default true
 
-  const defaultPar  = { r: 255, g: 0,   b: 0,   w: 0, a: 0, uv: 0, strobe: 0, brightness: 100 };
-  const defaultSpot = { r: 255, g: 255, b: 200, w: 0, brightness: 80 };
+  const defaultPar  = { r: 180, g: 60, b: 0,  w: 60, a: 40, uv: 0, strobe: 0, brightness: 45 };
+  const defaultSpot = { r: 200, g: 80, b: 10, w: 50, brightness: 45 };
+
+  // Steps may be in the layered shape ({ color: { par, spot } }) or the older
+  // flat shape ({ par, spot }). Read from either; always write back layered.
+  const curPar  = step.color?.par  ?? step.par  ?? defaultPar;
+  const curSpot = step.color?.spot ?? step.spot ?? defaultSpot;
+
+  function handleChange(patch) {
+    if ('par' in patch || 'spot' in patch) {
+      const nextColor = {
+        par:  'par'  in patch ? patch.par  : curPar,
+        spot: 'spot' in patch ? patch.spot : curSpot,
+      };
+      const { par, spot, ...rest } = patch;
+      onChange({ ...rest, color: nextColor, par: undefined, spot: undefined });
+    } else {
+      onChange(patch);
+    }
+  }
 
   return (
     <div className="step-panel">
@@ -268,11 +286,28 @@ export default function StepPanel({ step, onChange, onDelete, mode = 'advanced' 
 
       {/* Timing */}
       <div className="timing-row">
-        <SecInput label="Time"     value={step.time_s}     onChange={v => onChange({ time_s:     v })} tooltip="Start time from beginning of song" />
-        <SecInput label="Duration" value={step.duration_s} onChange={v => onChange({ duration_s: v })} tooltip="How long this step holds before the next one" />
-        <SecInput label="Fade in"  value={step.fade_in_s}  onChange={v => onChange({ fade_in_s:  v })} tooltip="Fade-in time in seconds (included in duration)" />
-        <SecInput label="Fade out" value={step.fade_out_s} onChange={v => onChange({ fade_out_s: v })} tooltip="Fade-out time at the end of this step" />
+        <SecInput label="Time"     value={step.time_s}     onChange={v => handleChange({ time_s:     v })} tooltip="Start time from beginning of song" />
+        <SecInput label="Duration" value={step.duration_s} onChange={v => handleChange({ duration_s: v })} tooltip="How long this step holds before the next one" />
+        <SecInput label="Fade in"  value={step.fade_in_s}  onChange={v => handleChange({ fade_in_s:  v })} tooltip="Fade-in time in seconds (included in duration)" />
+        <SecInput label="Fade out" value={step.fade_out_s} onChange={v => handleChange({ fade_out_s: v })} tooltip="Fade-out time at the end of this step" />
       </div>
+
+      {/* Effect layers on this step */}
+      {(step.effects ?? []).length > 0 && (
+        <div className="steppanel-fx">
+          <span className="steppanel-fx-label">Effect layers</span>
+          {step.effects.map(e => (
+            <span key={e.type} className="steppanel-fx-chip">
+              {e.type}
+              <button
+                className="steppanel-fx-x"
+                title="Remove this layer"
+                onClick={() => handleChange({ effects: step.effects.filter(x => x.type !== e.type) })}
+              >✕</button>
+            </span>
+          ))}
+        </div>
+      )}
 
       {/* Memo */}
       <label className="memo-row">
@@ -280,30 +315,26 @@ export default function StepPanel({ step, onChange, onDelete, mode = 'advanced' 
         <input
           className="text-input"
           value={step.memo ?? ''}
-          onChange={e => onChange({ memo: e.target.value })}
+          onChange={e => handleChange({ memo: e.target.value })}
           placeholder="Optional note for the operator…"
         />
       </label>
 
       {/* Light controls */}
-      {mode === 'basic' ? (
-        <PresetPicker step={step} onChange={onChange} />
-      ) : (
-        <div className="controls-grid">
-          <ParControls
-            par={step.par ?? defaultPar}
-            enabled={parEnabled}
-            onToggle={() => onChange({ parEnabled: !parEnabled })}
-            onChange={onChange}
-          />
-          <SpotControls
-            spot={step.spot ?? defaultSpot}
-            enabled={spotEnabled}
-            onToggle={() => onChange({ spotEnabled: !spotEnabled })}
-            onChange={onChange}
-          />
-        </div>
-      )}
+      <div className="controls-grid">
+        <ParControls
+          par={curPar}
+          enabled={parEnabled}
+          onToggle={() => handleChange({ parEnabled: !parEnabled })}
+          onChange={handleChange}
+        />
+        <SpotControls
+          spot={curSpot}
+          enabled={spotEnabled}
+          onToggle={() => handleChange({ spotEnabled: !spotEnabled })}
+          onChange={handleChange}
+        />
+      </div>
     </div>
   );
 }

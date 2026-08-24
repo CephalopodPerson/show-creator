@@ -27,18 +27,32 @@ export default function StagePreview({ steps = [], time = 0, playing = false }) 
   const parOn  = active && active.parEnabled  !== false;
   const spotOn = active && active.spotEnabled !== false;
 
-  const par  = rgbaFrom(active?.par  ?? {});
-  const spot = rgbaFrom(active?.spot ?? {});
+  // Supports both the layered shape (step.color.par) and the legacy flat one
+  const rawPar  = active?.color?.par  ?? active?.par  ?? {};
+  const rawSpot = active?.color?.spot ?? active?.spot ?? {};
+  const par  = rgbaFrom(rawPar);
+  const spot = rgbaFrom(rawSpot);
 
-  const strobe = (active?.par?.strobe ?? 0) > 0 && playing;
+  const fx        = active?.effects ?? [];
+  const strobeFx  = fx.find(e => e.type === 'strobe');
+  const pulseFx   = fx.find(e => e.type === 'pulse');
+  const strobe    = ((rawPar.strobe ?? 0) > 0 || !!strobeFx) && playing;
 
   // Fade-in progress within the current step, so the preview animates
   const intoStep = active ? time - active.time_s : 0;
-  const fadeIn   = active?.fade_in_s ?? 0;
+  const fadeLayer = fx.find(e => e.type === 'fade');
+  const fadeIn   = (fadeLayer && (fadeLayer.direction === 'in' || fadeLayer.direction === 'both'))
+    ? (fadeLayer.duration_s ?? 1)
+    : (active?.fade_in_s ?? 0);
   const fadeGain = fadeIn > 0 ? Math.min(1, intoStep / fadeIn) : 1;
 
-  const parA  = parOn  ? par.alpha  * fadeGain : 0;
-  const spotA = spotOn ? spot.alpha * fadeGain : 0;
+  // Pulse modulates the preview so you can see the effect before exporting
+  const pulseGain = (pulseFx && playing)
+    ? 1 - (pulseFx.depth ?? 0.5) * (0.5 + 0.5 * Math.sin(intoStep * Math.PI * 2 * (pulseFx.rate_hz ?? 2)))
+    : 1;
+
+  const parA  = parOn  ? par.alpha  * fadeGain * pulseGain : 0;
+  const spotA = spotOn ? spot.alpha * fadeGain * pulseGain : 0;
 
   return (
     <div className="stage-preview">
@@ -96,13 +110,17 @@ export default function StagePreview({ steps = [], time = 0, playing = false }) 
           <>
             <span className="stage-chip">
               <span className="stage-swatch" style={{ background: css(par, Math.max(0.15, parA)) }} />
-              Par {parOn ? `${active.par?.brightness ?? 100}%` : 'off'}
+              Par {parOn ? `${rawPar.brightness ?? 100}%` : 'off'}
             </span>
             <span className="stage-chip">
               <span className="stage-swatch" style={{ background: css(spot, Math.max(0.15, spotA)) }} />
-              Spot {spotOn ? `${active.spot?.brightness ?? 100}%` : 'off'}
+              Spot {spotOn ? `${rawSpot.brightness ?? 100}%` : 'off'}
             </span>
-            {(active.par?.strobe ?? 0) > 0 && <span className="stage-chip">⚡ Strobe {active.par.strobe}</span>}
+            {fx.map(e => (
+              <span key={e.type} className="stage-chip">
+                {e.type === 'fade' ? '◐' : e.type === 'flash' ? '✦' : e.type === 'pulse' ? '◉' : '⚡'} {e.type}
+              </span>
+            ))}
             <span className="stage-chip stage-chip-dim">Step at {active.time_s}s · {active.duration_s}s</span>
           </>
         ) : (
