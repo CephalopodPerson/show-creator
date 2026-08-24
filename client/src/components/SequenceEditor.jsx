@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import WaveformPlayer from './WaveformPlayer';
-import Timeline, { RULER_H, TRACK_H, FX_H, MEMO_H, TRACKS } from './Timeline';
+import Timeline, { RULER_H, TRACK_H, MEMO_H, TRACKS } from './Timeline';
 import StepPanel from './StepPanel';
 import StagePreview from './StagePreview';
-import PaletteSidebar, { COLOR_META, EFFECT_META, usePaletteDrag, DragGhost, useUsage } from './Palette';
+import PaletteSidebar, { COLOR_META, EFFECT_META, usePaletteDrag, DragGhost, useUsage, useCustomColors } from './Palette';
 import WizardPad, { padToSettings } from './WizardPad';
 import useHistory, { useUndoShortcuts } from '../hooks/useHistory';
+import { detectTempo, syncToHz } from '../lib/beats';
 import { api, u } from '../api';
 
 const WAVEFORM_H  = 88;
@@ -62,7 +63,12 @@ export default function SequenceEditor({ sequence, showName, fixtures, onSave, s
   const [keepSections,  setKeepSections]  = useState(false);
   const [wizardRunning, setWizardRunning] = useState(false);
 
+  const [bpm,       setBpm]       = useState(sequence.bpm ?? null);
+  const [bpmConf,   setBpmConf]   = useState(sequence.bpmConfidence ?? null);
+  const [detecting, setDetecting] = useState(false);
+
   const { bump, topColors, topEffects } = useUsage();
+  const { custom, addColor, removeColor } = useCustomColors();
 
   const saveTimer = useRef(null);
   const scrollRef = useRef(null);
@@ -122,19 +128,40 @@ export default function SequenceEditor({ sequence, showName, fixtures, onSave, s
     if (selectedId === id) setSelectedId(null);
   }
 
-  function removeEffect(stepId, type) {
+  function removeEffect(stepId, type, track) {
     hist.set(prev => prev.map(s => s.id === stepId
-      ? { ...s, effects: (s.effects ?? []).filter(e => e.type !== type) }
+      ? { ...s, effects: (s.effects ?? []).filter(e => !(e.type === type && (!e.track || e.track === track))) }
       : s));
   }
 
+  // ── Beat detection ──
+  const detectBpm = useCallback(async () => {
+    if (!audioPath || detecting) return;
+    setDetecting(true);
+    try {
+      const buf = await (await fetch(u(audioPath))).arrayBuffer();
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const decoded = await ctx.decodeAudioData(buf);
+      ctx.close();
+      const { bpm: found, confidence } = detectTempo(decoded);
+      setBpm(found);
+      setBpmConf(confidence);
+      onSave({ ...sequence, steps, bpm: found, bpmConfidence: confidence });
+    } catch (err) {
+      setWarnings(w => [...w, `Beat detection failed: ${err.message}`]);
+    }
+    setDetecting(false);
+  }, [audioPath, detecting, sequence, steps, onSave]);
+
   // ── Drag-and-drop from the palette ──
-  const handleDrop = useCallback(({ payload, stepId, track }) => {
+  const handleDrop = useCallback(({ payload, stepId, track, frac = 0 }) => {
     if (!payload || !stepId) return;
     setSelectedId(stepId);
 
-    if (payload.kind === 'color' && (track === 'par' || track === 'spot')) {
-      const c = COLOR_META[payload.key];
+    // ── Color ──
+    if (payload.kind === 'color') {
+      const c = payload.color ?? COLOR_META[payload.key];
+      if (!c) return;
       bump('color', payload.key);
       hist.set(prev => prev.map(s => {
         if (s.id !== stepId) return s;
@@ -145,19 +172,75 @@ export default function SequenceEditor({ sequence, showName, fixtures, onSave, s
           par: undefined, spot: undefined,
         };
       }));
+      return;
     }
 
-    if (payload.kind === 'effect' && track === 'fx') {
+    // ── Flash: carve a short block out of the host at the drop point ──
+    if (payload.kind === 'flash') {
+      bump('effect', 'flash');
+      hist.set(prev => {
+        const sorted = [...prev].sort((a, b) => a.time_s - b.time_s);
+        const host = sorted.find(s => s.id === stepId);
+        if (!host) return prev;
+
+        const FLASH_S = 0.15;
+        // Land on the drop point, but keep the flash inside the host block
+        let at = host.time_s + frac * host.duration_s;
+        at = Math.max(host.time_s, Math.min(at, host.time_s + host.duration_s - FLASH_S));
+        if (host.duration_s <= FLASH_S * 2) return prev;   // too short to split
+
+        const headDur = +(at - host.time_s).toFixed(3);
+        const tailAt  = +(at + FLASH_S).toFixed(3);
+        const tailDur = +(host.time_s + host.duration_s - tailAt).toFixed(3);
+
+        // Flash inherits the host color, punched up to full
+        const hostCol = { par: host.color?.par ?? host.par ?? {}, spot: host.color?.spot ?? host.spot ?? {} };
+        const punch = c => ({ ...c, brightness: Math.min(maxBrightness, Math.round((c.brightness ?? 50) * 1.7)) });
+
+        const flash = {
+          id: crypto.randomUUID(),
+          time_s: +at.toFixed(3),
+          duration_s: FLASH_S,
+          fade_in_s: 0, fade_out_s: 0,
+          parEnabled: host.parEnabled, spotEnabled: host.spotEnabled,
+          color: { par: punch(hostCol.par), spot: punch(hostCol.spot) },
+          effects: [],
+          isFlash: true,
+          memo: '',
+        };
+
+        const out = prev.filter(s => s.id !== host.id);
+        if (headDur > 0.02) out.push({ ...host, duration_s: headDur });
+        out.push(flash);
+        if (tailDur > 0.02) {
+          out.push({
+            ...JSON.parse(JSON.stringify(host)),
+            id: crypto.randomUUID(),
+            time_s: tailAt,
+            duration_s: tailDur,
+            memo: '',
+          });
+        }
+        return out.sort((a, b) => a.time_s - b.time_s);
+      });
+      return;
+    }
+
+    // ── Effect layer, attached to the track it was dropped on ──
+    if (payload.kind === 'effect') {
       bump('effect', payload.key);
       hist.set(prev => prev.map(s => {
         if (s.id !== stepId) return s;
-        const cur = s.effects ?? [];
-        // One of each type per step; dropping the same type again replaces it
-        const rest = cur.filter(e => e.type !== payload.key);
-        return { ...s, effects: [...rest, EFFECT_META[payload.key].make()] };
+        const cur  = s.effects ?? [];
+        const rest = cur.filter(e => !(e.type === payload.key && (!e.track || e.track === track)));
+        const made = { ...EFFECT_META[payload.key].make(), track };
+        // Resolve beat-synced rates now so the exporter stays simple
+        if (made.sync && bpm) made.rate_hz = +syncToHz(bpm, made.sync).toFixed(3);
+        else if (made.sync) made.rate_hz = 2;
+        return { ...s, effects: [...rest, made] };
       }));
     }
-  }, [hist, brightness, maxBrightness, bump]);
+  }, [hist, brightness, maxBrightness, bump, bpm]);
 
   const { drag, startDrag } = usePaletteDrag(handleDrop);
 
@@ -270,6 +353,15 @@ export default function SequenceEditor({ sequence, showName, fixtures, onSave, s
       });
       const peak = Math.max(...smooth, 0.0001);
 
+      // Detect tempo once here so synced pulses land on the beat
+      let tempo = bpm;
+      try {
+        const t = detectTempo(decoded);
+        tempo = t.bpm;
+        setBpm(t.bpm);
+        setBpmConf(t.confidence);
+      } catch { /* fall back to whatever bpm we already had */ }
+
       let splitPoints;
       if (keepSections && steps.length > 0) {
         splitPoints = [...steps].sort((a, b) => a.time_s - b.time_s).map(s => s.time_s);
@@ -304,15 +396,28 @@ export default function SequenceEditor({ sequence, showName, fixtures, onSave, s
         const scale  = 0.75 + 0.25 * energy;
 
         // X (punch) picks the effect character, Y (energy) gates how often it fires
+        // X (punch) picks the character, Y (energy) gates how often it fires.
+        // Pulses are beat-synced when we have a tempo, so they sit on the music.
         const effects = [];
-        if (i > 0 && cfg.fadeDur > 0.25) effects.push({ type: 'fade', direction: 'in', duration_s: cfg.fadeDur });
-        const lively = energy > 0.85 - padY * 0.35;
-        if (lively) {
-          if (cfg.punch > 0.75)      effects.push({ type: 'flash',  at: 0, duration_s: 0.12, repeat: 3, gap_s: 0.26 });
-          else if (cfg.punch > 0.45) effects.push({ type: 'pulse',  rate_hz: 2 + padY * 2, depth: 0.25 + padY * 0.25 });
-          else if (padY > 0.7)       effects.push({ type: 'pulse',  rate_hz: 1,            depth: 0.18 });
+        if (i > 0 && cfg.fadeDur > 0.25) {
+          effects.push({ type: 'fade', direction: 'in', duration_s: cfg.fadeDur, track: 'par' });
+          effects.push({ type: 'fade', direction: 'in', duration_s: cfg.fadeDur, track: 'spot' });
         }
-        if (cfg.punch > 0.9 && energy > 0.9) effects.push({ type: 'strobe', value: 180 });
+        const lively = energy > 0.85 - padY * 0.35;
+        if (lively && cfg.punch > 0.45 && cfg.punch <= 0.75) {
+          const sync = padY > 0.7 ? 'eighth' : 'quarter';
+          effects.push({
+            type: 'pulse', sync, track: 'par',
+            rate_hz: +syncToHz(tempo, sync).toFixed(3),
+            depth: 0.25 + padY * 0.25,
+          });
+        } else if (lively && padY > 0.7 && cfg.punch <= 0.45) {
+          effects.push({
+            type: 'pulse', sync: 'half', track: 'par',
+            rate_hz: +syncToHz(tempo, 'half').toFixed(3), depth: 0.18,
+          });
+        }
+        if (cfg.punch > 0.9 && energy > 0.9) effects.push({ type: 'strobe', value: 180, track: 'par' });
 
         return {
           id: crypto.randomUUID(),
@@ -330,7 +435,33 @@ export default function SequenceEditor({ sequence, showName, fixtures, onSave, s
         };
       });
 
-      hist.set(built);
+      // At high punch, drop one-shot flash blocks right on each section start —
+      // these are real blocks the user can move, resize or recolor afterwards.
+      let final = built;
+      if (cfg.punch > 0.75) {
+        const FLASH_S = 0.14;
+        final = [];
+        for (const b of built) {
+          const energyHere = smooth[Math.min(Math.round(b.time_s / W), smooth.length - 1)] / peak;
+          if (b.time_s > 0 && b.duration_s > FLASH_S * 3 && energyHere > 0.55) {
+            const punch = c => ({ ...c, brightness: Math.min(maxBrightness, Math.round(c.brightness * 1.7)) });
+            final.push({
+              id: crypto.randomUUID(),
+              time_s: b.time_s, duration_s: FLASH_S,
+              fade_in_s: 0, fade_out_s: 0,
+              parEnabled: true, spotEnabled: true,
+              color: { par: punch(b.color.par), spot: punch(b.color.spot) },
+              effects: [], isFlash: true, memo: '',
+            });
+            final.push({ ...b, time_s: +(b.time_s + FLASH_S).toFixed(3), duration_s: +(b.duration_s - FLASH_S).toFixed(3), effects: b.effects });
+          } else {
+            final.push(b);
+          }
+        }
+        final.sort((a, b) => a.time_s - b.time_s);
+      }
+
+      hist.set(final);
       setShowWizard(false);
     } catch (err) {
       console.error('Wizard failed:', err);
@@ -370,6 +501,13 @@ export default function SequenceEditor({ sequence, showName, fixtures, onSave, s
         maxBrightness={maxBrightness}
         topColors={topColors}
         topEffects={topEffects}
+        custom={custom}
+        onAddColor={addColor}
+        onRemoveColor={removeColor}
+        bpm={bpm}
+        bpmConfidence={bpmConf}
+        onDetectBpm={detectBpm}
+        detecting={detecting}
         onCopy={doCopy}
         onPaste={doPaste}
         canPaste={!!clipboard}

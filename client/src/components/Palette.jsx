@@ -21,11 +21,17 @@ export const COLORS = [
 ];
 
 export const EFFECTS = [
-  { key: 'fade',   label: 'Fade',   icon: '◐', hint: 'Ease into this section',  make: () => ({ type: 'fade',   direction: 'in', duration_s: 1.5 }) },
-  { key: 'flash',  label: 'Flash',  icon: '✦', hint: 'Quick bursts of color',   make: () => ({ type: 'flash',  at: 0, duration_s: 0.15, repeat: 3, gap_s: 0.35 }) },
-  { key: 'pulse',  label: 'Pulse',  icon: '◉', hint: 'Rhythmic breathing',      make: () => ({ type: 'pulse',  rate_hz: 2, depth: 0.5 }) },
-  { key: 'strobe', label: 'Strobe', icon: '⚡', hint: 'Hard strobe on the pars', make: () => ({ type: 'strobe', value: 200 }) },
+  { key: 'fade',   label: 'Fade',   icon: '◐', hint: 'Ease into this block',
+    make: () => ({ type: 'fade', direction: 'in', duration_s: 1.5 }) },
+  { key: 'pulse',  label: 'Pulse',  icon: '◉', hint: 'Rhythmic breathing, locked to the beat',
+    make: () => ({ type: 'pulse',  sync: 'quarter', depth: 0.5 }) },
+  { key: 'strobe', label: 'Strobe', icon: '⚡', hint: 'Hard strobe — pars only',
+    make: () => ({ type: 'strobe', value: 200 }) },
 ];
+
+// Flash is not a layer — it drops in as its own short block on the timeline,
+// so it can be moved, resized and colored like anything else.
+export const FLASH_TOOL = { key: 'flash', label: 'Flash', icon: '✦', hint: 'Drop a quick one-shot flash block' };
 
 export const EFFECT_META = Object.fromEntries(EFFECTS.map(e => [e.key, e]));
 export const COLOR_META  = Object.fromEntries(COLORS.map(c => [c.key, c]));
@@ -33,11 +39,52 @@ export const COLOR_META  = Object.fromEntries(COLORS.map(c => [c.key, c]));
 // ── Usage tracking ────────────────────────────────────────────────────────────
 // Counts live in localStorage so "frequently used" reflects how this operator
 // actually works, and survives reloads.
-const USAGE_KEY = 'paletteUsage';
+const USAGE_KEY  = 'paletteUsage';
+const CUSTOM_KEY = 'customColors';
 
 function readUsage() {
   try { return JSON.parse(localStorage.getItem(USAGE_KEY)) ?? { colors: {}, effects: {} }; }
   catch { return { colors: {}, effects: {} }; }
+}
+
+// Custom colors the operator mixes themselves, persisted locally.
+export function useCustomColors() {
+  const [custom, setCustom] = useState(() => {
+    try { return JSON.parse(localStorage.getItem(CUSTOM_KEY)) ?? []; } catch { return []; }
+  });
+
+  function persist(next) {
+    setCustom(next);
+    try { localStorage.setItem(CUSTOM_KEY, JSON.stringify(next)); } catch {}
+  }
+
+  function addColor(hex) {
+    const { r, g, b } = hexToRgb(hex);
+    // White channel is driven by how close the color is to neutral, so pale
+    // picks actually use the white LEDs instead of washing out the RGB ones.
+    const mx = Math.max(r, g, b), mn = Math.min(r, g, b);
+    const w  = mx === 0 ? 0 : Math.round((mn / mx) * mx * 0.8);
+    const key = 'custom-' + hex.replace('#', '');
+    if (custom.some(c => c.key === key)) return;
+    const entry = {
+      key, label: hex.toUpperCase(), hex, custom: true,
+      par:  { r, g, b, w, a: 0, uv: 0 },
+      spot: { r, g, b, w },
+    };
+    persist([entry, ...custom].slice(0, 12));
+  }
+
+  function removeColor(key) { persist(custom.filter(c => c.key !== key)); }
+
+  return { custom, addColor, removeColor };
+}
+
+function hexToRgb(hex) {
+  return {
+    r: parseInt(hex.slice(1, 3), 16) || 0,
+    g: parseInt(hex.slice(3, 5), 16) || 0,
+    b: parseInt(hex.slice(5, 7), 16) || 0,
+  };
 }
 
 export function useUsage() {
@@ -95,10 +142,14 @@ export function usePaletteDrag(onDrop) {
       const target = el?.closest?.('[data-drop-step]');
       clearHot();
       if (target && matches(target, dragRef.current)) {
+        // Fraction across the block, so a flash lands at the moment you drop it
+        const r = target.getBoundingClientRect();
+        const frac = r.width > 0 ? Math.min(1, Math.max(0, (ev.clientX - r.left) / r.width)) : 0;
         onDrop?.({
           payload: dragRef.current,
           stepId:  target.getAttribute('data-drop-step'),
           track:   target.getAttribute('data-drop-track'),
+          frac,
         });
       }
       dragRef.current = null;
@@ -122,9 +173,9 @@ export function usePaletteDrag(onDrop) {
 function matches(target, payload) {
   const track = target.getAttribute('data-drop-track');
   if (!payload) return false;
-  if (payload.kind === 'color')  return track === 'par' || track === 'spot';
-  if (payload.kind === 'effect') return track === 'fx';
-  return false;
+  // Colors, effects and flashes all land directly on a light track now —
+  // there is no separate effects row.
+  return track === 'par' || track === 'spot';
 }
 
 // ── Floating ghost that follows the pointer ───────────────────────────────────
@@ -148,17 +199,25 @@ export function DragGhost({ drag }) {
 export default function PaletteSidebar({
   startDrag, brightness, onBrightness, maxBrightness = 100,
   topColors = [], topEffects = [],
+  custom = [], onAddColor, onRemoveColor,
+  bpm, bpmConfidence, onDetectBpm, detecting,
   onCopy, onPaste, canPaste, hasSelection,
   onUndo, onRedo, canUndo, canRedo,
 }) {
   const b = Math.min(brightness, maxBrightness);
+  const [picking, setPicking] = useState('#ff8800');
 
   const Swatch = ({ c }) => (
     <button
       className="swatch"
       style={{ background: c.hex }}
-      onPointerDown={e => startDrag(e, { kind: 'color', key: c.key, label: c.label, hex: c.hex })}
-      title={`${c.label} — drag onto a Par or Spot block`}
+      onPointerDown={e => startDrag(e, { kind: 'color', key: c.key, label: c.label, hex: c.hex, color: c })}
+      onContextMenu={e => {
+        if (!c.custom) return;
+        e.preventDefault();
+        onRemoveColor?.(c.key);
+      }}
+      title={c.custom ? `${c.label} — drag onto a block (right-click to remove)` : `${c.label} — drag onto a block`}
       type="button"
     />
   );
@@ -167,7 +226,7 @@ export default function PaletteSidebar({
     <button
       className="fx-chip"
       onPointerDown={ev => startDrag(ev, { kind: 'effect', key: e.key, label: e.label, icon: e.icon })}
-      title={`${e.label} — ${e.hint}. Drag onto the Effects row.`}
+      title={`${e.label} — ${e.hint}. Drag onto a Par or Spot block.`}
       type="button"
     >
       <span className="fx-chip-icon">{e.icon}</span>
@@ -183,7 +242,8 @@ export default function PaletteSidebar({
           <div className="side-title">Frequent</div>
           {topColors.length > 0 && (
             <div className="swatch-grid">
-              {topColors.map(k => COLOR_META[k]).filter(Boolean).map(c => <Swatch key={c.key} c={c} />)}
+              {topColors.map(k => COLOR_META[k] ?? custom.find(c => c.key === k))
+                        .filter(Boolean).map(c => <Swatch key={c.key} c={c} />)}
             </div>
           )}
           {topEffects.length > 0 && (
@@ -194,18 +254,16 @@ export default function PaletteSidebar({
         </div>
       )}
 
-      {/* Brightness applies to whatever you drop next */}
+      {/* Brightness for the next drop */}
       <div className="side-section">
         <div className="side-title">Brightness <span className="side-hint">for new drops</span></div>
-        <div className="side-bright">
-          <div className="side-bright-row">
-            <input type="range" min={5} max={maxBrightness} value={b} onChange={e => onBrightness(+e.target.value)} />
-            <span className="side-bright-val">{b}%</span>
-          </div>
+        <div className="side-bright-row">
+          <input type="range" min={5} max={maxBrightness} value={b} onChange={e => onBrightness(+e.target.value)} />
+          <span className="side-bright-val">{b}%</span>
         </div>
       </div>
 
-      {/* All colors */}
+      {/* Colors */}
       <div className="side-section">
         <div className="side-title">Colors <span className="side-hint">drag out</span></div>
         <div className="swatch-grid">
@@ -213,12 +271,59 @@ export default function PaletteSidebar({
         </div>
       </div>
 
-      {/* Effects */}
+      {/* Custom colors */}
       <div className="side-section">
-        <div className="side-title">Effects <span className="side-hint">layer on top</span></div>
+        <div className="side-title">Custom</div>
+        {custom.length > 0 && (
+          <div className="swatch-grid">
+            {custom.map(c => <Swatch key={c.key} c={c} />)}
+          </div>
+        )}
+        <div className="custom-add">
+          <input
+            type="color"
+            className="custom-picker"
+            value={picking}
+            onChange={e => setPicking(e.target.value)}
+            title="Mix a color"
+          />
+          <button className="tool-btn" onClick={() => onAddColor?.(picking)} type="button">＋ Add</button>
+        </div>
+        {custom.length > 0 && <div className="side-hint">Right-click a custom swatch to remove it</div>}
+      </div>
+
+      {/* Flash tool + effects */}
+      <div className="side-section">
+        <div className="side-title">Effects <span className="side-hint">drag onto a block</span></div>
         <div className="fx-grid">
+          <button
+            className="fx-chip fx-chip-flash"
+            onPointerDown={ev => startDrag(ev, { kind: 'flash', key: 'flash', label: 'Flash', icon: FLASH_TOOL.icon })}
+            title="Flash — drop onto a block to punch a quick one-shot hit in at that moment"
+            type="button"
+          >
+            <span className="fx-chip-icon">{FLASH_TOOL.icon}</span>
+            <span className="fx-chip-label">Flash</span>
+          </button>
           {EFFECTS.map(e => <FxChip key={e.key} e={e} />)}
         </div>
+      </div>
+
+      {/* Tempo */}
+      <div className="side-section">
+        <div className="side-title">Tempo</div>
+        <div className="bpm-row">
+          <span className="bpm-value">{bpm ? `${bpm} BPM` : '—'}</span>
+          {bpm != null && bpmConfidence != null && (
+            <span className={`bpm-conf${bpmConfidence < 0.35 ? ' bpm-conf-low' : ''}`}>
+              {bpmConfidence < 0.35 ? 'low confidence' : `${Math.round(bpmConfidence * 100)}%`}
+            </span>
+          )}
+        </div>
+        <button className="tool-btn" onClick={onDetectBpm} disabled={detecting} type="button">
+          {detecting ? 'Listening…' : bpm ? '↻ Re-detect' : '♪ Detect beat'}
+        </button>
+        <div className="side-hint">Pulse and strobe lock to this tempo</div>
       </div>
 
       {/* Edit tools */}

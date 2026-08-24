@@ -701,3 +701,30 @@ button:disabled { opacity: .42; cursor: not-allowed; }
   .controls-grid { grid-template-columns: 1fr; }
   .step-panel { max-height: 50vh; }
 }
+
+/* ── Custom colors, flash blocks, tempo ── */
+.custom-add { display: flex; gap: 6px; align-items: center; }
+.custom-picker { width: 40px; height: 30px; padding: 2px; border: 1px solid var(--border-2); border-radius: var(--r-sm); background: var(--panel); cursor: pointer; flex-shrink: 0; }
+.custom-add .tool-btn { flex: 1; }
+.fx-chip-flash { background: var(--accent-soft); border-color: var(--accent-line); }
+.fx-chip-flash .fx-chip-icon { color: var(--accent); }
+
+.block-fx { position: absolute; top: 2px; left: 3px; display: flex; gap: 2px; z-index: 3; }
+.block-fx .fx-badge { font-size: 10px; padding: 0 4px; line-height: 1.5; background: rgba(0,0,0,.45); color: #fff; border-radius: 3px; }
+.block-fx .fx-badge:hover { background: var(--danger); }
+
+.step-flash {
+  border: 1px solid rgba(255,255,255,.85) !important;
+  box-shadow: 0 0 8px 1px rgba(255,255,255,.55);
+  min-width: 5px;
+}
+.step-flash::after {
+  content: '✦'; position: absolute; inset: 0;
+  display: grid; place-items: center; font-size: 9px;
+  color: rgba(255,255,255,.95); pointer-events: none;
+}
+
+.bpm-row { display: flex; align-items: baseline; gap: 8px; }
+.bpm-value { font-size: 15px; font-weight: 650; color: var(--text); }
+.bpm-conf { font-size: 10.5px; color: var(--ok); }
+.bpm-conf-low { color: var(--warn); }

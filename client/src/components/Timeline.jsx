@@ -8,10 +8,9 @@ export const FX_H    = 30;
 export const MEMO_H  = 26;
 
 const TRACKS = [
-  { key: 'par',  label: 'Par Lights', h: TRACK_H, tip: 'Par wash lights (RGBWAU + strobe)' },
-  { key: 'spot', label: 'Spotlight',  h: TRACK_H, tip: 'Moving head spotlight (color & intensity only — position handled live)' },
-  { key: 'fx',   label: 'Effects',    h: FX_H,    tip: 'Effect layers — drag Fade / Flash / Pulse / Strobe here' },
-  { key: 'memo', label: 'Memo',       h: MEMO_H,  tip: 'Operator note — visible in timeline, not sent to lights' },
+  { key: 'par',  label: 'Par Lights', h: TRACK_H, tip: 'Par wash lights — drop colors and effects straight onto a block' },
+  { key: 'spot', label: 'Spotlight',  h: TRACK_H, tip: 'Moving head spot — color and intensity only, position stays live' },
+  { key: 'memo', label: 'Memo',       h: MEMO_H,  tip: 'Operator note — visible in the timeline, not sent to lights' },
 ];
 
 // Read colors off a step, tolerating the legacy flat shape
@@ -42,7 +41,7 @@ function needsLightText(cssColor) {
 function hasStrobe(step, trackKey) {
   if (trackKey !== 'par' || step.parEnabled === false) return false;
   if ((stepPar(step)?.strobe ?? 0) > 0) return true;
-  return (step.effects ?? []).some(e => e.type === 'strobe');
+  return (step.effects ?? []).some(e => e.type === 'strobe' && (!e.track || e.track === 'par'));
 }
 
 // ── Move drag with neighbor-clamping ──────────────────────────────────────────
@@ -147,31 +146,6 @@ export default function Timeline({
             const width = Math.max(16, step.duration_s * pxPerSec);
             const isSelected = step.id === selectedId;
 
-            // ── FX row: badges inside a droppable lane ──
-            if (tr.key === 'fx') {
-              const fx = step.effects ?? [];
-              return (
-                <div
-                  key={`${step.id}-fx`}
-                  className={`fx-lane${isSelected ? ' selected' : ''}`}
-                  style={{ left, width, top: 3, height: tr.h - 6 }}
-                  data-drop-step={step.id}
-                  data-drop-track="fx"
-                  onClick={e => { e.stopPropagation(); onSelect(step.id); }}
-                  title="Drag an effect here"
-                >
-                  {fx.map(e => (
-                    <span
-                      key={e.type}
-                      className="fx-badge"
-                      title={`${EFFECT_META[e.type]?.label ?? e.type} — click to remove`}
-                      onClick={ev => { ev.stopPropagation(); onRemoveEffect?.(step.id, e.type); }}
-                    >{EFFECT_META[e.type]?.icon ?? '?'}</span>
-                  ))}
-                </div>
-              );
-            }
-
             const color = stepColor(step, tr.key);
             if (color === null) return null;   // memo with no text → invisible
 
@@ -180,8 +154,11 @@ export default function Timeline({
             const lightTxt = !isOff && needsLightText(color);
             const h        = tr.h - 8;
 
+            // Effects attached to this track (no track set = applies to both)
+            const trackFx = (step.effects ?? []).filter(e => !e.track || e.track === tr.key);
+
             // Fade overlays, from either the legacy field or a fade layer
-            const fadeLayer = (step.effects ?? []).find(e => e.type === 'fade');
+            const fadeLayer = trackFx.find(e => e.type === 'fade');
             const fIn  = fadeLayer && (fadeLayer.direction === 'in'  || fadeLayer.direction === 'both')
               ? fadeLayer.duration_s : step.fade_in_s;
             const fOut = fadeLayer && (fadeLayer.direction === 'out' || fadeLayer.direction === 'both')
@@ -196,9 +173,10 @@ export default function Timeline({
                 key={`${step.id}-${tr.key}`}
                 className={[
                   'step-block',
-                  isSelected ? 'selected'    : '',
-                  isOff      ? 'step-off'    : '',
-                  strobe     ? 'step-strobe' : '',
+                  isSelected  ? 'selected'    : '',
+                  isOff       ? 'step-off'    : '',
+                  strobe      ? 'step-strobe' : '',
+                  step.isFlash ? 'step-flash' : '',
                 ].filter(Boolean).join(' ')}
                 style={{ left, top: 4, width, height: h, background: isOff ? 'transparent' : color }}
                 {...(droppable ? { 'data-drop-step': step.id, 'data-drop-track': tr.key } : {})}
@@ -211,8 +189,21 @@ export default function Timeline({
                   : <>
                       {fadeInPx  > 0 && <div className="step-fade-in"  style={{ width: fadeInPx  }} />}
                       {fadeOutPx > 0 && <div className="step-fade-out" style={{ width: fadeOutPx }} />}
+                      {tr.key !== 'memo' && trackFx.length > 0 && (
+                        <span className="block-fx">
+                          {trackFx.map(e => (
+                            <span
+                              key={e.type}
+                              className="fx-badge"
+                              title={`${EFFECT_META[e.type]?.label ?? e.type} on ${tr.label} — click to remove`}
+                              onPointerDown={ev => ev.stopPropagation()}
+                              onClick={ev => { ev.stopPropagation(); onRemoveEffect?.(step.id, e.type, tr.key); }}
+                            >{EFFECT_META[e.type]?.icon ?? '?'}</span>
+                          ))}
+                        </span>
+                      )}
                       <span className="block-label" style={{ color: lightTxt ? '#fff' : '#111' }}>
-                        {tr.key === 'memo' ? step.memo : `${step.duration_s.toFixed(1)}s`}
+                        {tr.key === 'memo' ? step.memo : (width > 54 ? `${step.duration_s.toFixed(1)}s` : '')}
                       </span>
                       <div
                         className="resize-handle"

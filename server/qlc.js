@@ -118,10 +118,18 @@ function flattenStep(step) {
 
   const scale = (c, f) => c ? { ...c, brightness: Math.max(0, Math.round((c.brightness ?? 100) * f)) } : c;
 
+  // Effects are attached to a fixture track. An effect with no track set is
+  // treated as applying to both, which keeps older saved shows working.
+  const onPar  = e => !e.track || e.track === 'par';
+  const onSpot = e => !e.track || e.track === 'spot';
+
   const fadeFx   = effects.find(e => e.type === 'fade');
-  const strobeFx = effects.find(e => e.type === 'strobe');
+  const strobeFx = effects.find(e => e.type === 'strobe' && onPar(e));  // strobe is a par channel
   const pulseFx  = effects.find(e => e.type === 'pulse');
   const flashFx  = effects.filter(e => e.type === 'flash');
+
+  const pulsePar  = pulseFx ? onPar(pulseFx)  : false;
+  const pulseSpot = pulseFx ? onSpot(pulseFx) : false;
 
   // Strobe is a channel value on the par fixture, applied to every sub-step
   const withStrobe = p => (p && strobeFx) ? { ...p, strobe: strobeFx.value ?? 200 } : p;
@@ -156,8 +164,8 @@ function flattenStep(step) {
       prevMs = edgeMs;
       const f = i % 2 === 0 ? 1 : (1 - depth);
       out.push({
-        par:      withStrobe(scale(basePar,  f)),
-        spot:     scale(baseSpot, f),
+        par:      withStrobe(pulsePar  ? scale(basePar,  f) : basePar),
+        spot:     pulseSpot ? scale(baseSpot, f) : baseSpot,
         fade_in:  i === 0 ? fadeIn : sliceS * 0.4,
         duration: sliceS,
         fade_out: i === count - 1 ? fadeOut : 0,
