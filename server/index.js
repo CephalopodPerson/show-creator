@@ -15,6 +15,13 @@ const ARCHIVE_DIR  = process.env.ARCHIVE_DIR || path.join(__dirname, '..', 'arch
 const SETTINGS_FILE = path.join(__dirname, '..', 'data', 'settings.json');
 const ADMIN_PIN    = process.env.ADMIN_PIN || '1234';
 
+// ── Release channel ───────────────────────────────────────────────────────────
+// 'stable' or 'beta'. Each channel runs as its own PM2 process on its own port
+// with its own SHOWS_DIR, so beta can't corrupt live show data — the beta step
+// format (layered colour + effects) is not readable by the stable exporter.
+const CHANNEL     = process.env.CHANNEL === 'beta' ? 'beta' : 'stable';
+const OTHER_URL   = process.env.OTHER_CHANNEL_URL || '';
+
 // In-memory admin sessions (token → expiry)
 const adminSessions = new Map();
 
@@ -108,6 +115,11 @@ function saveShow(name, data) {
 function invalidateShow(name) { showCache.delete(name); }
 
 // ── Routes ───────────────────────────────────────────────────────────────────
+
+// Which channel is this instance, and where's the other one?
+app.get('/api/channel', (req, res) => {
+  res.json({ channel: CHANNEL, otherUrl: OTHER_URL });
+});
 
 // Settings — public read strips secrets; admin write
 app.get('/api/settings', (req, res) => {
