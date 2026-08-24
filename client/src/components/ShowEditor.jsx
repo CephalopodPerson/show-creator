@@ -4,34 +4,35 @@ import { api } from '../api';
 
 const API = name => `/api/shows/${encodeURIComponent(name)}`;
 
-export default function ShowEditor({ showName, view = 'grid' }) {
-  const [show,        setShow]        = useState(null);
-  const [sequences,   setSequences]   = useState([]);
-  const [active,      setActive]      = useState(null);
-  const [saving,      setSaving]      = useState(false);
-  const [exporting,   setExporting]   = useState(false);
-  const [qxwFile,     setQxwFile]     = useState(null);
+// Strip extension and leading track numbers: "03 - Song.mp3" → "Song"
+function cleanFileName(filename) {
+  return filename.replace(/\.[^/.]+$/, '').replace(/^\d+[\s._-]+/, '').trim();
+}
 
-  // Inline delete confirmation
-  const [confirmId,   setConfirmId]   = useState(null);
+function fmtDur(s) {
+  if (!s) return null;
+  const m = Math.floor(s / 60);
+  return `${m}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+}
 
-  // Inline rename
-  const [renamingId,  setRenamingId]  = useState(null);
-  const [renameVal,   setRenameVal]   = useState('');
-  const renameRef = useRef(null);
+export default function ShowEditor({ showName, onExit }) {
+  const [show,      setShow]      = useState(null);
+  const [songs,     setSongs]     = useState([]);
+  const [openId,    setOpenId]    = useState(null);   // null = picker, else editing
+  const [saving,    setSaving]    = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [settings,  setSettings]  = useState({});
+  const [confirmId, setConfirmId] = useState(null);
+  const [renameId,  setRenameId]  = useState(null);
+  const [renameVal, setRenameVal] = useState('');
+  const [toast,     setToast]     = useState(null);
+  const [copyFor,   setCopyFor]   = useState(null);
+  const [allShows,  setAllShows]  = useState([]);
 
-  // Upload progress
-  const [uploading,   setUploading]   = useState(false);
-  const [settings,    setSettings]    = useState({});
-  const audioPickerRef = useRef(null);
-
-  // Copy-to picker: id of sequence being copied, list of target shows
-  const [copyingId,   setCopyingId]   = useState(null);
-  const [allShows,    setAllShows]    = useState([]);
-
-  // Toast message
-  const [toast,       setToast]       = useState(null);
   const toastTimer = useRef(null);
+  const pickerRef  = useRef(null);
+  const renameRef  = useRef(null);
 
   function showToast(msg, type = 'error') {
     clearTimeout(toastTimer.current);
@@ -39,377 +40,266 @@ export default function ShowEditor({ showName, view = 'grid' }) {
     toastTimer.current = setTimeout(() => setToast(null), 3500);
   }
 
-  // Global settings (brightness cap etc.)
-  useEffect(() => {
-    api('/api/settings').then(r => r.json()).then(setSettings).catch(() => {});
-  }, []);
+  useEffect(() => { api('/api/settings').then(r => r.json()).then(setSettings).catch(() => {}); }, []);
 
-  // Load show on mount
   useEffect(() => {
-    fetch(API(showName))
-      .then(r => r.json())
-      .then(data => {
-        setShow(data);
-        setSequences(data.sequences ?? []);
-        if ((data.sequences ?? []).length > 0) setActive(data.sequences[0].id);
-      })
-      .catch(() => showToast('Failed to load show data'));
+    api(API(showName)).then(r => r.json())
+      .then(d => { setShow(d); setSongs(d.sequences ?? []); })
+      .catch(() => showToast('Could not load this show'));
   }, [showName]);
 
-  // Auto-focus rename input
-  useEffect(() => {
-    if (renamingId) renameRef.current?.focus();
-  }, [renamingId]);
+  useEffect(() => { if (renameId) renameRef.current?.focus(); }, [renameId]);
 
-  // Auto-save a single sequence
-  const saveSequence = useCallback(async (seq) => {
+  const saveSong = useCallback(async (seq) => {
     setSaving(true);
     try {
-      await fetch(`${API(showName)}/sequences/${seq.id}`, {
+      await api(`${API(showName)}/sequences/${seq.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(seq),
       });
-      setSequences(prev => prev.map(s => s.id === seq.id ? seq : s));
-    } catch {
-      showToast('Auto-save failed');
-    }
+      setSongs(prev => prev.map(s => s.id === seq.id ? seq : s));
+    } catch { showToast('Auto-save failed'); }
     setSaving(false);
   }, [showName]);
 
-  // ── Add sequences from audio files ───────────────────────────────────────
-  function cleanFileName(filename) {
-    // Remove extension, strip leading track numbers like "01. " or "01 - "
-    return filename
-      .replace(/\.[^/.]+$/, '')
-      .replace(/^\d+[\s._-]+/, '')
-      .trim();
-  }
-
+  // ── Add songs from audio files ──
   async function handleAudioFiles(files) {
     if (!files?.length) return;
     setUploading(true);
-    setConfirmId(null); setCopyingId(null);
-    let firstNewId = null;
+    let firstId = null;
 
     for (const file of Array.from(files)) {
       try {
-        // 1. Create the sequence with the cleaned filename
-        const name = cleanFileName(file.name);
-        const seqRes = await fetch(`${API(showName)}/sequences`, {
+        const seq = await api(`${API(showName)}/sequences`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name, steps: [] }),
-        });
-        const seq = await seqRes.json();
-        if (!firstNewId) firstNewId = seq.id;
+          body: JSON.stringify({ name: cleanFileName(file.name), steps: [] }),
+        }).then(r => r.json());
+        if (!firstId) firstId = seq.id;
 
-        // 2. Upload the audio file
         const fd = new FormData();
         fd.append('audio', file);
-        const audioRes  = await fetch(`${API(showName)}/audio`, { method: 'POST', body: fd });
-        const audioData = await audioRes.json();
+        const audio = await api(`${API(showName)}/audio`, { method: 'POST', body: fd }).then(r => r.json());
 
-        // 3. Attach the audio path to the sequence
-        const updated = await fetch(`${API(showName)}/sequences/${seq.id}`, {
+        const updated = await api(`${API(showName)}/sequences/${seq.id}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ...seq, audioPath: audioData.path }),
+          body: JSON.stringify({ ...seq, audioPath: audio.path }),
         }).then(r => r.json());
 
-        setSequences(prev => [...prev, updated]);
-        if (audioData.warnings?.length) showToast(audioData.warnings[0], 'warn');
+        setSongs(prev => [...prev, updated]);
+        if (audio.warnings?.length) showToast(audio.warnings[0], 'warn');
       } catch {
-        showToast(`Failed to add ${file.name}`);
+        showToast(`Could not add ${file.name}`);
       }
     }
-
-    if (firstNewId) setActive(firstNewId);
     setUploading(false);
-    // Reset the file input so the same files can be re-selected if needed
-    if (audioPickerRef.current) audioPickerRef.current.value = '';
+    if (pickerRef.current) pickerRef.current.value = '';
   }
 
-  // ── Inline rename ─────────────────────────────────────────────────────────
-  function startRename(seq, e) {
-    e.stopPropagation();
-    setRenamingId(seq.id);
-    setRenameVal(seq.name);
-  }
-
-  async function commitRename(seq) {
+  async function commitRename(song) {
     const name = renameVal.trim();
-    setRenamingId(null);
-    if (!name || name === seq.name) return;
+    setRenameId(null);
+    if (!name || name === song.name) return;
     try {
-      const updated = await fetch(`${API(showName)}/sequences/${seq.id}`, {
+      const updated = await api(`${API(showName)}/sequences/${song.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...seq, name }),
+        body: JSON.stringify({ ...song, name }),
       }).then(r => r.json());
-      setSequences(prev => prev.map(s => s.id === seq.id ? updated : s));
-    } catch {
-      showToast('Rename failed');
-    }
+      setSongs(prev => prev.map(s => s.id === song.id ? updated : s));
+    } catch { showToast('Rename failed'); }
   }
 
-  // ── Delete sequence ───────────────────────────────────────────────────────
-  function requestDelete(id) { setConfirmId(id); setCopyingId(null); }
-
-  async function confirmDelete() {
-    const id = confirmId;
+  async function deleteSong(id) {
     setConfirmId(null);
     try {
-      await fetch(`${API(showName)}/sequences/${id}`, { method: 'DELETE' });
-      setSequences(prev => prev.filter(s => s.id !== id));
-      if (active === id) setActive(sequences.find(s => s.id !== id)?.id ?? null);
-    } catch {
-      showToast('Failed to delete sequence');
-    }
+      await api(`${API(showName)}/sequences/${id}`, { method: 'DELETE' });
+      setSongs(prev => prev.filter(s => s.id !== id));
+    } catch { showToast('Could not delete'); }
   }
 
-  // ── Reorder sequences ─────────────────────────────────────────────────────
-  async function moveSequence(id, dir) {
-    const idx     = sequences.findIndex(s => s.id === id);
-    const newIdx  = idx + dir;
-    if (newIdx < 0 || newIdx >= sequences.length) return;
-    const reordered = [...sequences];
-    [reordered[idx], reordered[newIdx]] = [reordered[newIdx], reordered[idx]];
-    setSequences(reordered);
-    try {
-      await fetch(`${API(showName)}/sequences/order`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ids: reordered.map(s => s.id) }),
-      });
-    } catch {
-      showToast('Failed to save order');
-    }
-  }
-
-  // ── Copy sequence to another show ─────────────────────────────────────────
   async function startCopy(id) {
-    setCopyingId(id); setConfirmId(null);
+    setCopyFor(id);
     try {
       const data = await api('/api/shows').then(r => r.json());
       setAllShows(data.map(s => s.name).filter(n => n !== showName));
-    } catch {
-      showToast('Could not load shows list');
-      setCopyingId(null);
-    }
+    } catch { showToast('Could not load shows'); setCopyFor(null); }
   }
 
-  async function doCopy(targetShow) {
-    const id = copyingId;
-    setCopyingId(null);
+  async function doCopy(target) {
+    const id = copyFor;
+    setCopyFor(null);
     try {
-      await fetch(`${API(showName)}/sequences/${id}/copy`, {
+      await api(`${API(showName)}/sequences/${id}/copy`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ targetShow }),
+        body: JSON.stringify({ targetShow: target }),
       });
-      const seq = sequences.find(s => s.id === id);
-      showToast(`"${seq?.name}" copied to ${targetShow}`, 'ok');
-    } catch {
-      showToast('Copy failed');
-    }
+      showToast(`Copied to ${target}`, 'ok');
+    } catch { showToast('Copy failed'); }
   }
 
-  // ── QLC+ file upload ──────────────────────────────────────────────────────
   async function uploadQxw(e) {
     const file = e.target.files[0];
     if (!file) return;
     const fd = new FormData();
     fd.append('qxw', file);
     try {
-      const res  = await fetch(`${API(showName)}/qxw`, { method: 'POST', body: fd });
-      const data = await res.json();
-      if (data.fixtures) {
-        setShow(prev => ({ ...prev, fixtures: data.fixtures }));
-        setQxwFile(file.name);
-      }
-    } catch {
-      showToast('Failed to upload .qxw file');
-    }
+      const data = await api(`${API(showName)}/qxw`, { method: 'POST', body: fd }).then(r => r.json());
+      if (data.fixtures) { setShow(p => ({ ...p, fixtures: data.fixtures, qxwPath: 'set' })); showToast('Fixture file loaded', 'ok'); }
+      else showToast(data.error ?? 'Could not read .qxw');
+    } catch { showToast('Upload failed'); }
   }
 
-  // ── Export ────────────────────────────────────────────────────────────────
   async function exportQxw() {
-    if (!show?.qxwPath) { showToast('Upload a .qxw file first', 'warn'); return; }
+    if (!show?.qxwPath) { showToast('This show has no QLC+ file yet', 'warn'); return; }
     setExporting(true);
     try {
-      const res = await fetch(`${API(showName)}/export`, { method: 'POST' });
+      const res = await api(`${API(showName)}/export`, { method: 'POST' });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        showToast('Export failed: ' + (err.error ?? 'unknown error'));
-        setExporting(false); return;
+        showToast('Export failed: ' + (err.error ?? 'unknown'));
+      } else {
+        const blob = await res.blob();
+        const url  = URL.createObjectURL(blob);
+        const a    = document.createElement('a');
+        a.href = url; a.download = `${showName}.qxw`; a.click();
+        URL.revokeObjectURL(url);
+        showToast('Exported', 'ok');
       }
-      const blob = await res.blob();
-      const url  = URL.createObjectURL(blob);
-      const a    = document.createElement('a');
-      a.href = url; a.download = `${showName}.qxw`; a.click();
-      URL.revokeObjectURL(url);
-      showToast('Exported!', 'ok');
-    } catch (e) {
-      showToast('Export failed: ' + e.message);
-    }
+    } catch (e) { showToast('Export failed: ' + e.message); }
     setExporting(false);
   }
 
-  const activeSeq = sequences.find(s => s.id === active);
+  const openSong = songs.find(s => s.id === openId);
 
+  // ── Editing one song: full screen ──
+  if (openSong) {
+    return (
+      <>
+        <SequenceEditor
+          key={openSong.id}
+          sequence={openSong}
+          showName={showName}
+          fixtures={show?.fixtures ?? []}
+          onSave={saveSong}
+          settings={settings}
+          onBack={() => setOpenId(null)}
+        />
+        {saving && <div className="save-indicator">Saving…</div>}
+        {toast && <div className={`seq-toast seq-toast-${toast.type}`} onClick={() => setToast(null)}>{toast.msg}</div>}
+      </>
+    );
+  }
+
+  // ── Song picker ──
   return (
-    <div className="show-editor">
-
-      {/* ── Left panel: sequence list ──────────────────────────────────────── */}
-      <aside className="seq-list">
-        <div className="seq-list-header">
-          <span className="panel-title">Sequences</span>
-          <label className="btn-icon" title="Add sequences from audio files">
-            {uploading ? '…' : '＋'}
-            <input
-              ref={audioPickerRef}
-              type="file"
-              accept="audio/*"
-              multiple
-              hidden
-              onChange={e => handleAudioFiles(e.target.files)}
-            />
-          </label>
+    <div className="song-picker">
+      <div className="song-picker-head">
+        <div>
+          <h2>Songs</h2>
+          <p className="song-picker-sub">
+            {songs.length === 0 ? 'Add audio files to get started' :
+             `${songs.length} song${songs.length !== 1 ? 's' : ''} in ${showName}`}
+          </p>
         </div>
+        <div className="song-picker-actions">
+          <label className="btn-secondary file-btn">
+            {show?.qxwPath ? '✓ QLC+ file' : 'Load .qxw'}
+            <input type="file" accept=".qxw" hidden onChange={uploadQxw} />
+          </label>
+          <label className="btn-secondary file-btn">
+            {uploading ? 'Uploading…' : '＋ Add songs'}
+            <input ref={pickerRef} type="file" accept="audio/*" multiple hidden onChange={e => handleAudioFiles(e.target.files)} />
+          </label>
+          <button className="btn-primary" onClick={exportQxw} disabled={exporting || !show?.qxwPath}>
+            {exporting ? 'Exporting…' : '↓ Export .qxw'}
+          </button>
+        </div>
+      </div>
 
-        {/* Sequence list */}
-        {sequences.map((seq, idx) => (
-          <div key={seq.id}>
-            <div
-              className={`seq-item ${seq.id === active ? 'active' : ''}`}
-              onClick={() => { setActive(seq.id); setConfirmId(null); setCopyingId(null); }}
-            >
-              {renamingId === seq.id ? (
+      {show?.fixtures?.length > 0 && (
+        <div className="fixture-badges" style={{ marginBottom: 18 }}>
+          {show.fixtures.map(f => (
+            <span key={f.id} className="fixture-badge" title={`ID:${f.id}  DMX:${f.address + 1}  ${f.channels}ch`}>{f.name}</span>
+          ))}
+        </div>
+      )}
+
+      <div className="song-grid">
+        {songs.map(song => (
+          <div key={song.id} className="song-card" onClick={() => renameId !== song.id && setOpenId(song.id)}>
+            <div className="song-thumb">♫</div>
+
+            <div className="song-info">
+              {renameId === song.id ? (
                 <input
                   ref={renameRef}
-                  className="seq-rename-input"
+                  className="song-rename-input"
                   value={renameVal}
                   onChange={e => setRenameVal(e.target.value)}
-                  onKeyDown={e => { if (e.key === 'Enter') commitRename(seq); if (e.key === 'Escape') setRenamingId(null); }}
-                  onBlur={() => commitRename(seq)}
                   onClick={e => e.stopPropagation()}
+                  onBlur={() => commitRename(song)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter')  commitRename(song);
+                    if (e.key === 'Escape') setRenameId(null);
+                  }}
                 />
               ) : (
-                <span className="seq-item-name" onDoubleClick={e => startRename(seq, e)} title="Double-click to rename">{seq.name}</span>
+                <div className="song-name" title={song.name}>{song.name}</div>
               )}
-              <span className="seq-item-steps">{seq.steps?.length ?? 0}</span>
-
-              {/* Reorder */}
-              <button className="seq-action-btn" title="Move up"
-                disabled={idx === 0}
-                onClick={e => { e.stopPropagation(); moveSequence(seq.id, -1); }}>▲</button>
-              <button className="seq-action-btn" title="Move down"
-                disabled={idx === sequences.length - 1}
-                onClick={e => { e.stopPropagation(); moveSequence(seq.id, 1); }}>▼</button>
-
-              {/* Copy */}
-              <button className="seq-action-btn" title="Copy to show…"
-                onClick={e => { e.stopPropagation(); startCopy(seq.id); }}>⎘</button>
-
-              {/* Delete */}
-              <button className="btn-delete" title="Delete"
-                onClick={e => { e.stopPropagation(); requestDelete(seq.id); }}>✕</button>
+              <div className="song-meta">
+                <span>{song.steps?.length ?? 0} block{(song.steps?.length ?? 0) !== 1 ? 's' : ''}</span>
+                {song.audioDuration ? <span>· {fmtDur(song.audioDuration)}</span> : null}
+                {song.audioPath
+                  ? <span className="song-badge song-badge-ok">audio</span>
+                  : <span className="song-badge song-badge-warn">no audio</span>}
+              </div>
             </div>
 
-            {/* Inline delete confirmation */}
-            {confirmId === seq.id && (
-              <div className="seq-confirm-row">
-                <span className="seq-confirm-msg">Delete "{seq.name}"?</span>
-                <button className="seq-confirm-yes" onClick={confirmDelete}>Delete</button>
-                <button className="seq-confirm-no"  onClick={() => setConfirmId(null)}>Cancel</button>
+            <div className="song-actions" onClick={e => e.stopPropagation()}>
+              <button className="song-act" title="Rename" onClick={() => { setRenameId(song.id); setRenameVal(song.name); }}>✎</button>
+              <button className="song-act" title="Copy to another show" onClick={() => startCopy(song.id)}>⧉</button>
+              <button className="song-act" title="Delete" onClick={() => setConfirmId(song.id)}>✕</button>
+            </div>
+
+            {confirmId === song.id && (
+              <div className="show-card-confirm" onClick={e => e.stopPropagation()}>
+                <span>Delete “{song.name}”?</span>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button className="seq-confirm-yes" onClick={() => deleteSong(song.id)}>Delete</button>
+                  <button className="seq-confirm-no"  onClick={() => setConfirmId(null)}>Cancel</button>
+                </div>
               </div>
             )}
 
-            {/* Inline copy-to picker */}
-            {copyingId === seq.id && (
-              <div className="seq-copy-row">
-                <span className="seq-copy-label">Copy to:</span>
-                {allShows.length === 0
-                  ? <span className="seq-copy-empty">No other shows</span>
-                  : allShows.map(name => (
-                      <button key={name} className="seq-copy-target" onClick={() => doCopy(name)}>
-                        {name}
-                      </button>
-                    ))
-                }
-                <button className="seq-add-cancel" onClick={() => setCopyingId(null)}>✕</button>
+            {copyFor === song.id && (
+              <div className="show-card-confirm" onClick={e => e.stopPropagation()}>
+                <span>Copy to which show?</span>
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'center' }}>
+                  {allShows.length === 0
+                    ? <span className="muted">No other shows</span>
+                    : allShows.map(n => (
+                        <button key={n} className="seq-confirm-no" onClick={() => doCopy(n)}>{n}</button>
+                      ))}
+                </div>
+                <button className="seq-confirm-no" onClick={() => setCopyFor(null)}>Cancel</button>
               </div>
             )}
           </div>
         ))}
 
-        {sequences.length === 0 && !uploading && (
-          <label className="seq-upload-prompt">
-            <span>＋ Add audio files</span>
-            <span className="seq-upload-sub">Click to upload MP3 / WAV<br/>Multiple files create multiple sequences</span>
-            <input type="file" accept="audio/*" multiple hidden onChange={e => handleAudioFiles(e.target.files)} />
-          </label>
-        )}
-        {uploading && (
-          <p className="muted" style={{ padding: '12px' }}>Uploading…</p>
-        )}
-
-        {/* QLC+ panel */}
-        <div className="qxw-panel">
-          <label className="btn-secondary file-btn">
-            {qxwFile ?? (show?.qxwPath ? '✓ .qxw loaded' : 'Load .qxw')}
-            <input type="file" accept=".qxw" hidden onChange={uploadQxw} />
-          </label>
-
-          {show?.fixtures && (
-            <div className="fixture-badges">
-              {show.fixtures.map(f => (
-                <span key={f.id} className="fixture-badge"
-                  title={`ID:${f.id}  DMX:${f.address + 1}  ${f.channels}ch`}>
-                  {f.name}
-                </span>
-              ))}
-            </div>
-          )}
-
-          <button
-            className="btn-export"
-            onClick={exportQxw}
-            disabled={exporting || !show?.qxwPath}
-          >
-            {exporting ? 'Exporting…' : 'Export .qxw'}
-          </button>
-        </div>
-
-        {saving && <div className="save-indicator">Saving…</div>}
-
-        {toast && (
-          <div className={`seq-toast seq-toast-${toast.type}`} onClick={() => setToast(null)}>
-            {toast.msg}
-          </div>
-        )}
-      </aside>
-
-      {/* ── Right panel: active sequence editor ───────────────────────────── */}
-      <div className="seq-editor-area">
-        {activeSeq
-          ? <SequenceEditor
-              key={activeSeq.id}
-              sequence={activeSeq}
-              showName={showName}
-              fixtures={show?.fixtures ?? []}
-              onSave={saveSequence}
-              view={view}
-              settings={settings}
-            />
-          : <div className="empty-state">
-              {sequences.length === 0
-                ? 'Click ＋ to add your first sequence'
-                : 'Select a sequence from the left'}
-            </div>
-        }
+        <label className="song-dropzone">
+          <span style={{ fontSize: 26 }}>♫</span>
+          <span className="song-dropzone-title">Add songs</span>
+          <span className="song-dropzone-sub">Drop in MP3 or WAV files — each one becomes a song</span>
+          <input type="file" accept="audio/*" multiple hidden onChange={e => handleAudioFiles(e.target.files)} />
+        </label>
       </div>
+
+      {toast && <div className={`seq-toast seq-toast-${toast.type}`} onClick={() => setToast(null)}>{toast.msg}</div>}
     </div>
   );
 }

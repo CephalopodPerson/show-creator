@@ -2,7 +2,7 @@ import React, { useMemo } from 'react';
 
 // ── Stage light simulation ────────────────────────────────────────────────────
 // Layout mirrors the real rig: two Par wash lights on either side, one moving
-// head spot centred between them. Renders the state of whichever step is
+// head spot centered between them. Renders the state of whichever step is
 // active at `time`, so it doubles as a scrubbable preview.
 
 function rgbaFrom(c = {}, gain = 1) {
@@ -16,7 +16,7 @@ function rgbaFrom(c = {}, gain = 1) {
 
 function css({ r, g, b }, a) { return `rgba(${Math.round(r)},${Math.round(g)},${Math.round(b)},${a})`; }
 
-export default function StagePreview({ steps = [], time = 0, playing = false }) {
+export default function StagePreview({ steps = [], time = 0, playing = false, popped = false, onPopOut, onPopIn }) {
   const active = useMemo(() => {
     const sorted = [...steps].sort((a, b) => a.time_s - b.time_s);
     return sorted.find(s => time >= s.time_s && time < s.time_s + s.duration_s)
@@ -58,7 +58,12 @@ export default function StagePreview({ steps = [], time = 0, playing = false }) 
     <div className="stage-preview">
       <div className="stage-preview-label">
         Stage preview
+        {playing && <span className="stage-live">● LIVE</span>}
         {active?.memo && <span className="stage-memo">{active.memo}</span>}
+        <span className="stage-spacer" />
+        {popped
+          ? <button className="stage-pop" onClick={onPopIn}  title="Dock the preview back into the editor">⤡ Dock</button>
+          : <button className="stage-pop" onClick={onPopOut} title="Pop out into a floating panel you can move around">⤢ Pop out</button>}
       </div>
 
       <div className={`stage-box${strobe ? ' stage-strobe' : ''}`}>
@@ -76,7 +81,7 @@ export default function StagePreview({ steps = [], time = 0, playing = false }) 
           background: `linear-gradient(to bottom left, ${css(par, parA * 0.55)} 0%, transparent 75%)`,
         }} />
 
-        {/* Centre moving-head spot cone */}
+        {/* Center moving-head spot cone */}
         <div className="stage-spot-cone" style={{
           background: `linear-gradient(to bottom, ${css(spot, spotA * 0.75)} 0%, ${css(spot, spotA * 0.15)} 60%, transparent 100%)`,
         }} />

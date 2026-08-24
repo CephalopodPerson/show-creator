@@ -16,12 +16,12 @@ function hexToRgb(hex) {
 function ChanSlider({ label, value, max = 255, onChange, color, disabled }) {
   return (
     <label className={`chan-row${disabled ? ' chan-disabled' : ''}`}>
-      <span className="chan-label" style={{ color: disabled ? '#444' : (color ?? '#ccc') }}>{label}</span>
+      <span className="chan-label" style={{ color: disabled ? 'var(--text-faint)' : (color ?? 'var(--text-dim)') }}>{label}</span>
       <input
         type="range" min={0} max={max} value={value ?? 0}
         onChange={e => onChange(parseInt(e.target.value))}
         className="chan-slider"
-        style={{ accentColor: disabled ? '#333' : (color ?? '#4a9eff') }}
+        style={{ accentColor: disabled ? 'var(--border-2)' : (color ?? 'var(--accent)') }}
         disabled={disabled}
       />
       <input
@@ -67,7 +67,7 @@ function ColorPickerRow({ r = 0, g = 0, b = 0, onChange, disabled }) {
   const hex = rgbToHex(r, g, b);
   return (
     <div className={`color-picker-row${disabled ? ' chan-disabled' : ''}`}>
-      <span className="chan-label" style={{ color: disabled ? '#444' : '#ccc' }}>Color</span>
+      <span className="chan-label" style={{ color: disabled ? 'var(--text-faint)' : 'var(--text-dim)' }}>Color</span>
       <input
         type="color"
         value={hex}
@@ -77,14 +77,14 @@ function ColorPickerRow({ r = 0, g = 0, b = 0, onChange, disabled }) {
         }}
         className="color-picker-input"
         disabled={disabled}
-        title="Pick a colour — updates R, G, B sliders"
+        title="Pick a color — updates R, G, B sliders"
       />
-      <span className="color-picker-hex" style={{ color: disabled ? '#333' : '#666' }}>{hex.toUpperCase()}</span>
+      <span className="color-picker-hex">{hex.toUpperCase()}</span>
     </div>
   );
 }
 
-// ── Par / Spot colour preview swatch ──────────────────────────────────────────
+// ── Par / Spot color preview swatch ──────────────────────────────────────────
 function ColorSwatch({ r = 0, g = 0, b = 0, w = 0 }) {
   const lum = w * 0.4;
   return (
@@ -113,14 +113,14 @@ function ParControls({ par, enabled, onToggle, onChange }) {
         disabled={dis}
       />
 
-      <ChanSlider label="R"          value={par.r}          color="#ff4444" onChange={v => u('r', v)}          disabled={dis} />
-      <ChanSlider label="G"          value={par.g}          color="#44ff44" onChange={v => u('g', v)}          disabled={dis} />
-      <ChanSlider label="B"          value={par.b}          color="#4488ff" onChange={v => u('b', v)}          disabled={dis} />
-      <ChanSlider label="W"          value={par.w}          color="#ffffcc" onChange={v => u('w', v)}          disabled={dis} />
-      <ChanSlider label="A"          value={par.a}          color="#ffaa22" onChange={v => u('a', v)}          disabled={dis} />
-      <ChanSlider label="UV"         value={par.uv}         color="#cc44ff" onChange={v => u('uv', v)}         disabled={dis} />
-      <ChanSlider label="Strobe"     value={par.strobe}     color="#ffffff" onChange={v => u('strobe', v)}     disabled={dis} />
-      <ChanSlider label="Brightness" value={par.brightness} max={100} color="#aaaaaa" onChange={v => u('brightness', v)} disabled={dis} />
+      <ChanSlider label="R"          value={par.r}          color="#dc2626" onChange={v => u('r', v)}          disabled={dis} />
+      <ChanSlider label="G"          value={par.g}          color="#16a34a" onChange={v => u('g', v)}          disabled={dis} />
+      <ChanSlider label="B"          value={par.b}          color="#2563eb" onChange={v => u('b', v)}          disabled={dis} />
+      <ChanSlider label="W"          value={par.w}          color="#b8860b" onChange={v => u('w', v)}          disabled={dis} />
+      <ChanSlider label="A"          value={par.a}          color="#d97706" onChange={v => u('a', v)}          disabled={dis} />
+      <ChanSlider label="UV"         value={par.uv}         color="#9333ea" onChange={v => u('uv', v)}         disabled={dis} />
+      <ChanSlider label="Strobe"     value={par.strobe}     color="var(--text-dim)" onChange={v => u('strobe', v)}     disabled={dis} />
+      <ChanSlider label="Brightness" value={par.brightness} max={100} color="var(--text-dim)" onChange={v => u('brightness', v)} disabled={dis} />
     </div>
   );
 }
@@ -134,7 +134,7 @@ function SpotControls({ spot, enabled, onToggle, onChange }) {
       <div className="section-header">
         <ColorSwatch {...spot} />
         <span>Spotlight</span>
-        <span className="section-tip" title="Controls the moving head spotlight. Colour & intensity only — position is handled live by the operator.">?</span>
+        <span className="section-tip" title="Controls the moving head spotlight. Color & intensity only — position is handled live by the operator.">?</span>
         <TrackToggle enabled={enabled} onToggle={onToggle} />
       </div>
 
@@ -144,115 +144,17 @@ function SpotControls({ spot, enabled, onToggle, onChange }) {
         disabled={dis}
       />
 
-      <ChanSlider label="R"          value={spot.r}          color="#ff4444" onChange={v => u('r', v)}          disabled={dis} />
-      <ChanSlider label="G"          value={spot.g}          color="#44ff44" onChange={v => u('g', v)}          disabled={dis} />
-      <ChanSlider label="B"          value={spot.b}          color="#4488ff" onChange={v => u('b', v)}          disabled={dis} />
-      <ChanSlider label="W"          value={spot.w}          color="#ffffcc" onChange={v => u('w', v)}          disabled={dis} />
-      <ChanSlider label="Brightness" value={spot.brightness} max={100} color="#aaaaaa" onChange={v => u('brightness', v)} disabled={dis} />
-    </div>
-  );
-}
-
-// ── Basic mode presets ────────────────────────────────────────────────────────
-// Each preset stores base colour values at full brightness; brightness is applied on top.
-const PRESETS = [
-  { label: 'Red',        color: '#ff2222', par: { r: 255, g: 0,   b: 0,   w: 0,   a: 0,   uv: 0   }, spot: { r: 255, g: 0,   b: 0,   w: 0   } },
-  { label: 'Orange',     color: '#ff7700', par: { r: 255, g: 80,  b: 0,   w: 0,   a: 200, uv: 0   }, spot: { r: 255, g: 80,  b: 0,   w: 0   } },
-  { label: 'Yellow',     color: '#ffee00', par: { r: 255, g: 220, b: 0,   w: 0,   a: 100, uv: 0   }, spot: { r: 255, g: 220, b: 0,   w: 0   } },
-  { label: 'Green',      color: '#22dd22', par: { r: 0,   g: 220, b: 0,   w: 0,   a: 0,   uv: 0   }, spot: { r: 0,   g: 220, b: 0,   w: 0   } },
-  { label: 'Cyan',       color: '#00ccdd', par: { r: 0,   g: 200, b: 220, w: 0,   a: 0,   uv: 0   }, spot: { r: 0,   g: 200, b: 220, w: 0   } },
-  { label: 'Blue',       color: '#3366ff', par: { r: 0,   g: 60,  b: 255, w: 0,   a: 0,   uv: 0   }, spot: { r: 0,   g: 60,  b: 255, w: 0   } },
-  { label: 'Purple',     color: '#aa22ff', par: { r: 180, g: 0,   b: 255, w: 0,   a: 0,   uv: 0   }, spot: { r: 180, g: 0,   b: 255, w: 0   } },
-  { label: 'Pink',       color: '#ff44aa', par: { r: 255, g: 0,   b: 140, w: 0,   a: 0,   uv: 0   }, spot: { r: 255, g: 0,   b: 140, w: 0   } },
-  { label: 'Warm White', color: '#ffe0a0', par: { r: 255, g: 140, b: 20,  w: 255, a: 0,   uv: 0   }, spot: { r: 255, g: 160, b: 80,  w: 200 } },
-  { label: 'Cool White', color: '#cce8ff', par: { r: 180, g: 210, b: 255, w: 200, a: 0,   uv: 0   }, spot: { r: 180, g: 210, b: 255, w: 200 } },
-  { label: 'UV',         color: '#7700cc', par: { r: 0,   g: 0,   b: 0,   w: 0,   a: 0,   uv: 255 }, spot: { r: 40,  g: 0,   b: 100, w: 0   } },
-];
-
-// Scale a preset's colour values by a brightness factor (0–100) before applying
-function applyBrightnessScale(colours, brightness) {
-  const f = (brightness ?? 100) / 100;
-  const scaled = {};
-  for (const [k, v] of Object.entries(colours)) {
-    scaled[k] = typeof v === 'number' ? Math.round(v * f) : v;
-  }
-  return scaled;
-}
-
-function PresetPicker({ step, onChange }) {
-  const currentPreset = step._preset ?? null;
-  const brightness    = step._brightness ?? 60;
-  const strobe        = step.par?.strobe ?? 0;
-
-  function applyPreset(idx) {
-    const p   = PRESETS[idx];
-    const par  = { ...applyBrightnessScale(p.par, brightness), strobe, brightness };
-    const spot = { ...applyBrightnessScale(p.spot, brightness), brightness };
-    onChange({ par, spot, _preset: idx, _brightness: brightness });
-  }
-
-  function changeBrightness(val) {
-    const newBright = parseInt(val);
-    if (currentPreset !== null) {
-      const p    = PRESETS[currentPreset];
-      const par  = { ...applyBrightnessScale(p.par, newBright), strobe, brightness: newBright };
-      const spot = { ...applyBrightnessScale(p.spot, newBright), brightness: newBright };
-      onChange({ par, spot, _brightness: newBright });
-    } else {
-      onChange({ _brightness: newBright });
-    }
-  }
-
-  function changeStrobe(val) {
-    const newStrobe = parseInt(val);
-    onChange({ par: { ...(step.par ?? {}), strobe: newStrobe } });
-  }
-
-  return (
-    <div className="preset-picker">
-
-      {/* Row 1: colour swatches */}
-      <div className="preset-section-label">Colour</div>
-      <div className="preset-swatches">
-        {PRESETS.map((p, i) => (
-          <button
-            key={i}
-            className={`preset-swatch${currentPreset === i ? ' preset-swatch-active' : ''}`}
-            style={{ background: p.color }}
-            onClick={() => applyPreset(i)}
-            title={p.label}
-          ><span className="preset-swatch-label">{p.label}</span></button>
-        ))}
-      </div>
-
-      {/* Row 2: Brightness + Strobe sliders */}
-      <div className="preset-sliders">
-        <div className="preset-slider-row">
-          <span className="preset-bright-label">☀ Brightness</span>
-          <input
-            type="range" min={5} max={100} value={brightness}
-            onChange={e => changeBrightness(e.target.value)}
-            className="preset-bright-slider"
-          />
-          <span className="preset-bright-val">{brightness}%</span>
-        </div>
-        <div className="preset-slider-row">
-          <span className="preset-bright-label">⚡ Strobe</span>
-          <input
-            type="range" min={0} max={255} value={strobe}
-            onChange={e => changeStrobe(e.target.value)}
-            className="preset-strobe-slider"
-          />
-          <span className="preset-bright-val">{strobe === 0 ? 'Off' : strobe}</span>
-        </div>
-      </div>
-
+      <ChanSlider label="R"          value={spot.r}          color="#dc2626" onChange={v => u('r', v)}          disabled={dis} />
+      <ChanSlider label="G"          value={spot.g}          color="#16a34a" onChange={v => u('g', v)}          disabled={dis} />
+      <ChanSlider label="B"          value={spot.b}          color="#2563eb" onChange={v => u('b', v)}          disabled={dis} />
+      <ChanSlider label="W"          value={spot.w}          color="#b8860b" onChange={v => u('w', v)}          disabled={dis} />
+      <ChanSlider label="Brightness" value={spot.brightness} max={100} color="var(--text-dim)" onChange={v => u('brightness', v)} disabled={dis} />
     </div>
   );
 }
 
 // ── Main StepPanel ─────────────────────────────────────────────────────────────
-export default function StepPanel({ step, onChange, onDelete, mode = 'advanced' }) {
+export default function StepPanel({ step, onChange, onDelete }) {
   const parEnabled  = step.parEnabled  !== false;   // default true
   const spotEnabled = step.spotEnabled !== false;   // default true
 

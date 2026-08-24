@@ -140,18 +140,26 @@ function flattenStep(step) {
     // Cap the expansion so a pulse on a long section can't generate hundreds of
     // steps — QLC+ slows badly with very large sequences.
     const MAX_SUBSTEPS = 120;
-    let   half  = 1 / (rate * 2);
-    let   count = Math.max(2, Math.round(dur / half));
-    if (count > MAX_SUBSTEPS) { count = MAX_SUBSTEPS; half = dur / count; }
-    const out   = [];
+    let count = Math.max(2, Math.round(dur / (1 / (rate * 2))));
+    if (count > MAX_SUBSTEPS) count = MAX_SUBSTEPS;
+
+    // Durations are derived from cumulative millisecond boundaries rather than
+    // a fixed per-step value. Rounding each step independently would drift by
+    // up to half a millisecond per step, which across ~50 substeps pushes the
+    // sequence noticeably out of sync with the audio.
+    const totalMs = Math.round(dur * 1000);
+    const out = [];
+    let prevMs = 0;
     for (let i = 0; i < count; i++) {
-      const bright = i % 2 === 0;
-      const f      = bright ? 1 : (1 - depth);
+      const edgeMs = Math.round((totalMs * (i + 1)) / count);
+      const sliceS = (edgeMs - prevMs) / 1000;
+      prevMs = edgeMs;
+      const f = i % 2 === 0 ? 1 : (1 - depth);
       out.push({
         par:      withStrobe(scale(basePar,  f)),
         spot:     scale(baseSpot, f),
-        fade_in:  i === 0 ? fadeIn : half * 0.4,
-        duration: half,
+        fade_in:  i === 0 ? fadeIn : sliceS * 0.4,
+        duration: sliceS,
         fade_out: i === count - 1 ? fadeOut : 0,
         note:     i === 0 ? (step.memo ?? '') : '',
       });
@@ -221,9 +229,12 @@ function flattenStep(step) {
 
 function parDmx(params) {
   // params: { r,g,b,w,a,uv, strobe, brightness, fade_in, fade_out }
+  // NOTE: brightness is a 0–100 percentage, but strobe is a raw 0–255 DMX value
+  // (that's what the strobe slider and the strobe effect layer both produce).
+  // Rescaling it as a percentage used to emit values above 255.
   const dim = Math.round((params.brightness ?? 100) / 100 * 255);
   const pairs = [[0, dim]];
-  if (params.strobe > 0) pairs.push([1, Math.round(params.strobe / 100 * 255)]);
+  if (params.strobe > 0) pairs.push([1, Math.max(0, Math.min(255, Math.round(params.strobe)))]);
   if (params.r   > 0) pairs.push([4, params.r]);
   if (params.g   > 0) pairs.push([5, params.g]);
   if (params.b   > 0) pairs.push([6, params.b]);
