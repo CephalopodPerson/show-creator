@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { api } from '../api';
 
 function fmtBytes(b) {
   if (b < 1024)        return `${b} B`;
@@ -22,7 +23,7 @@ export default function StorageManager({ onClose }) {
   async function load() {
     setLoading(true);
     try {
-      const d = await fetch('/api/storage').then(r => r.json());
+      const d = await api('/api/storage').then(r => r.json());
       setData(d);
     } catch {
       setData(null);
@@ -35,7 +36,7 @@ export default function StorageManager({ onClose }) {
   async function deleteFile(showName, fileName) {
     setDeleting(true);
     try {
-      await fetch(`/api/shows/${encodeURIComponent(showName)}/uploads/${encodeURIComponent(fileName)}`, {
+      await api(`/api/shows/${encodeURIComponent(showName)}/uploads/${encodeURIComponent(fileName)}`, {
         method: 'DELETE',
       });
       await load();

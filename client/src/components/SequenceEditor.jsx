@@ -4,6 +4,7 @@ import Timeline, { RULER_H, TRACK_H, MEMO_H } from './Timeline';
 import StepPanel from './StepPanel';
 import StagePreview from './StagePreview';
 import GridEditor from './GridEditor';
+import { api, u } from '../api';
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 const WAVEFORM_H  = 88;
@@ -183,7 +184,7 @@ export default function SequenceEditor({ sequence, showName, fixtures, onSave, v
     if (!file) return;
     const fd = new FormData();
     fd.append('audio', file);
-    const res  = await fetch(`/api/shows/${encodeURIComponent(showName)}/audio`, { method: 'POST', body: fd });
+    const res  = await api(`/api/shows/${encodeURIComponent(showName)}/audio`, { method: 'POST', body: fd });
     const data = await res.json();
     setWarnings(data.warnings ?? []);
     setAudioPath(data.path);
@@ -212,7 +213,7 @@ export default function SequenceEditor({ sequence, showName, fixtures, onSave, v
     if (!audioPath) return;
     setWizardRunning(true);
     try {
-      const res    = await fetch(audioPath);
+      const res    = await fetch(u(audioPath));
       const buf    = await res.arrayBuffer();
       const tmpCtx = new (window.AudioContext || window.webkitAudioContext)();
       const decoded = await tmpCtx.decodeAudioData(buf);
@@ -353,7 +354,7 @@ export default function SequenceEditor({ sequence, showName, fixtures, onSave, v
     setAnalyzing(true);
     setSuggestions([]);
     try {
-      const res = await fetch(audioPath);
+      const res = await fetch(u(audioPath));
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const arrayBuf = await res.arrayBuffer();
 
@@ -622,7 +623,7 @@ export default function SequenceEditor({ sequence, showName, fixtures, onSave, v
 
             <WaveformPlayer
               ref={wsRef}
-              src={audioPath ?? null}
+              src={audioPath ? u(audioPath) : null}
               width={totalWidth}
               pxPerSec={pxPerSec}
               onTimeUpdate={setCurrentTime}

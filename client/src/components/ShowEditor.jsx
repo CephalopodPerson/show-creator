@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import SequenceEditor from './SequenceEditor';
+import { api } from '../api';
 
 const API = name => `/api/shows/${encodeURIComponent(name)}`;
 
@@ -40,7 +41,7 @@ export default function ShowEditor({ showName, view = 'grid' }) {
 
   // Global settings (brightness cap etc.)
   useEffect(() => {
-    fetch('/api/settings').then(r => r.json()).then(setSettings).catch(() => {});
+    api('/api/settings').then(r => r.json()).then(setSettings).catch(() => {});
   }, []);
 
   // Load show on mount
@@ -190,7 +191,7 @@ export default function ShowEditor({ showName, view = 'grid' }) {
   async function startCopy(id) {
     setCopyingId(id); setConfirmId(null);
     try {
-      const data = await fetch('/api/shows').then(r => r.json());
+      const data = await api('/api/shows').then(r => r.json());
       setAllShows(data.map(s => s.name).filter(n => n !== showName));
     } catch {
       showToast('Could not load shows list');

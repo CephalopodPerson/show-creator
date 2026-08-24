@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import StorageManager from './StorageManager';
+import { api } from '../api';
 
 export default function ShowList({ onOpen, onAdmin }) {
   const [shows,       setShows]       = useState([]);
@@ -8,13 +9,13 @@ export default function ShowList({ onOpen, onAdmin }) {
   const [showStorage, setShowStorage] = useState(false);
 
   useEffect(() => {
-    fetch('/api/shows').then(r => r.json()).then(setShows);
+    api('/api/shows').then(r => r.json()).then(setShows);
   }, []);
 
   async function createShow() {
     const name = newName.trim();
     if (!name) return;
-    await fetch(`/api/shows/${encodeURIComponent(name)}`, {
+    await api(`/api/shows/${encodeURIComponent(name)}`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name }),
     });
@@ -24,7 +25,7 @@ export default function ShowList({ onOpen, onAdmin }) {
 
   async function archiveShow(name) {
     setConfirmArch(null);
-    await fetch(`/api/shows/${encodeURIComponent(name)}/archive`, { method: 'POST' });
+    await api(`/api/shows/${encodeURIComponent(name)}/archive`, { method: 'POST' });
     setShows(prev => prev.filter(s => s.name !== name));
   }
 

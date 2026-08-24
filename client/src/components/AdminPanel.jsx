@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { api } from '../api';
 
 const TOKEN_KEY = 'adminToken';
 
@@ -14,7 +15,7 @@ function LoginForm({ onLogin }) {
   async function submit(e) {
     e.preventDefault();
     setErr('');
-    const res = await fetch('/api/admin/login', {
+    const res = await api('/api/admin/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ pin }),
@@ -62,9 +63,9 @@ export default function AdminPanel({ onBack }) {
 
   useEffect(() => {
     if (!token) return;
-    fetch('/api/settings').then(r => r.json()).then(setSettings);
-    fetch('/api/archive',        { headers: adminHeaders() }).then(r => r.json()).then(setArchive).catch(() => {});
-    fetch('/api/admin/template', { headers: adminHeaders() }).then(r => r.json()).then(setTemplate).catch(() => {});
+    api('/api/settings').then(r => r.json()).then(setSettings);
+    api('/api/archive',        { headers: adminHeaders() }).then(r => r.json()).then(setArchive).catch(() => {});
+    api('/api/admin/template', { headers: adminHeaders() }).then(r => r.json()).then(setTemplate).catch(() => {});
   }, [token]);
 
   async function uploadTemplate(e) {
@@ -72,7 +73,7 @@ export default function AdminPanel({ onBack }) {
     if (!file) return;
     const fd = new FormData();
     fd.append('qxw', file);
-    const res = await fetch('/api/admin/template', {
+    const res = await api('/api/admin/template', {
       method: 'POST',
       headers: { 'x-admin-token': localStorage.getItem(TOKEN_KEY) ?? '' },
       body: fd,
@@ -86,7 +87,7 @@ export default function AdminPanel({ onBack }) {
   async function changePin(e) {
     e.preventDefault();
     setPinMsg('');
-    const res = await fetch('/api/admin/pin', {
+    const res = await api('/api/admin/pin', {
       method: 'POST',
       headers: adminHeaders(),
       body: JSON.stringify({ currentPin: pinCur, newPin: pinNew }),
@@ -100,7 +101,7 @@ export default function AdminPanel({ onBack }) {
 
   async function saveSettings() {
     setSaving(true);
-    const res = await fetch('/api/settings', {
+    const res = await api('/api/settings', {
       method: 'PUT',
       headers: adminHeaders(),
       body: JSON.stringify(settings),
@@ -111,7 +112,7 @@ export default function AdminPanel({ onBack }) {
   }
 
   async function restoreShow(name) {
-    const res = await fetch(`/api/archive/${encodeURIComponent(name)}/restore`, {
+    const res = await api(`/api/archive/${encodeURIComponent(name)}/restore`, {
       method: 'POST', headers: adminHeaders(),
     });
     if (res.ok) setArchive(prev => prev.filter(s => s.name !== name));
@@ -120,13 +121,13 @@ export default function AdminPanel({ onBack }) {
 
   async function deleteShow(name) {
     if (!confirm(`Permanently delete "${name}"? This cannot be undone.`)) return;
-    await fetch(`/api/archive/${encodeURIComponent(name)}`, { method: 'DELETE', headers: adminHeaders() });
+    await api(`/api/archive/${encodeURIComponent(name)}`, { method: 'DELETE', headers: adminHeaders() });
     setArchive(prev => prev.filter(s => s.name !== name));
   }
 
   async function copyShow(name) {
     const newName = copyName[name]?.trim() || name + ' (copy)';
-    const res = await fetch(`/api/archive/${encodeURIComponent(name)}/copy`, {
+    const res = await api(`/api/archive/${encodeURIComponent(name)}/copy`, {
       method: 'POST',
       headers: adminHeaders(),
       body: JSON.stringify({ name: newName }),

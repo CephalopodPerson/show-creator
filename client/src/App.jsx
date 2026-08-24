@@ -3,6 +3,7 @@ import ShowList   from './components/ShowList';
 import ShowEditor from './components/ShowEditor';
 import AdminPanel from './components/AdminPanel';
 import './styles.css';
+import { api } from './api';
 
 export default function App() {
   const [view, setView]         = useState('list');     // 'list' | 'editor' | 'admin'
@@ -11,7 +12,7 @@ export default function App() {
   const [channel, setChannel]   = useState(null);       // { channel, otherUrl }
 
   useEffect(() => {
-    fetch('/api/channel').then(r => r.json()).then(setChannel).catch(() => {});
+    api('/api/channel').then(r => r.json()).then(setChannel).catch(() => {});
   }, []);
 
   function openShow(name) { setShowName(name); setView('editor'); }
