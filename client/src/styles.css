@@ -732,12 +732,11 @@ button:disabled { opacity: .42; cursor: not-allowed; }
      scrolling felt broken. Bottom padding clears the fixed bar. */
   html, body, #root { height: auto; }
   .app { height: auto; min-height: 100dvh; overflow: visible; }
-  .app-body { overflow: visible; display: block; padding-bottom: 78px; }
+  .app-body { overflow: visible; display: block; }
   .app-body > * { width: 100%; }
   .editor-shell, .editor-main, .editor-scroll { overflow: visible; height: auto; }
   .show-list, .song-picker, .admin-section, .preview-page { overflow: visible; }
 
-  .mobile-bar { display: flex; }
   .editor-sidebar { display: none; }          /* replaced by the bottom bar */
 
   /* Header: name + theme only */
@@ -781,20 +780,21 @@ button:disabled { opacity: .42; cursor: not-allowed; }
 /* ══ Mobile bottom bar & sheets ══════════════════════════════════════════ */
 .mobile-bar {
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 70;
-  display: none; background: var(--panel);
+  display: flex; background: var(--panel);
   border-top: 1px solid var(--border);
   padding: 6px 4px calc(6px + env(safe-area-inset-bottom));
   box-shadow: 0 -2px 12px rgba(16,24,40,.07);
 }
 .mbar-btn {
-  flex: 1; background: none; border: none; cursor: pointer;
+  flex: 1; min-width: 0; background: none; border: none; cursor: pointer;
   display: flex; flex-direction: column; align-items: center; gap: 2px;
   padding: 7px 4px; border-radius: var(--r-sm); color: var(--text-dim);
 }
 .mbar-btn:disabled { opacity: .35; }
 .mbar-active { background: var(--accent-soft); color: var(--accent); }
-.mbar-icon { font-size: 17px; line-height: 1; }
-.mbar-label { font-size: 10.5px; font-weight: 600; }
+.mbar-icon { font-size: 16px; line-height: 1; }
+.mbar-label { font-size: 9.5px; font-weight: 600; letter-spacing: -.01em; }
+@media (max-width: 380px) { .mbar-label { font-size: 8.5px; } .mbar-btn { padding: 7px 2px; } }
 
 .sheet-backdrop { position: fixed; inset: 0; background: rgba(16,20,30,.4); z-index: 75; }
 .sheet {
@@ -857,3 +857,8 @@ button:disabled { opacity: .42; cursor: not-allowed; }
 }
 .armed-bar .armed-dot { width: 15px; height: 15px; border-radius: 50%; border: 2px solid rgba(255,255,255,.75); flex-shrink: 0; }
 .armed-bar .armed-cancel { margin-left: auto; background: none; border: none; color: #fff; cursor: pointer; font-size: 13px; padding: 2px 4px; }
+
+/* Touch devices always get the bottom bar, so always reserve room for it. */
+@media (pointer: coarse) {
+  .app-body { padding-bottom: calc(70px + env(safe-area-inset-bottom)); }
+}

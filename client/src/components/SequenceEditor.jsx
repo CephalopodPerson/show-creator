@@ -605,13 +605,10 @@ export default function SequenceEditor({ sequence, showName, fixtures, onSave, s
           </>
         )}
 
-        {audioPath && (
+        {!isTouch && audioPath && (
           <button className="btn-primary" onClick={() => setShowWizard(true)} title="Rebuild the whole show from the song">
-            🪄 <span className="btn-text">Wizard</span>
+            🪄 Wizard
           </button>
-        )}
-        {isTouch && (
-          <button className="btn-secondary btn-icon-only" onClick={splitAtCursor} title="Split at the playhead">✂</button>
         )}
       </div>
 
@@ -693,6 +690,9 @@ export default function SequenceEditor({ sequence, showName, fixtures, onSave, s
           brightness={brightness} onBrightness={setBrightness} maxBrightness={maxBrightness}
           custom={custom} onAddColor={addColor} onRemoveColor={removeColor}
           onUndo={hist.undo} canUndo={hist.canUndo}
+          onSplit={splitAtCursor}
+          onWizard={() => setShowWizard(true)}
+          canWizard={!!audioPath}
           pickerValue={picker} onPickerChange={setPicker}
         />
       )}

@@ -14,6 +14,7 @@ export default function MobileBar({
   brightness, onBrightness, maxBrightness = 100,
   custom = [], onAddColor, onRemoveColor,
   onUndo, canUndo,
+  onSplit, onWizard, canWizard,
   pickerValue, onPickerChange,
 }) {
   const b = Math.min(brightness, maxBrightness);
@@ -151,6 +152,16 @@ export default function MobileBar({
         >
           <span className="mbar-icon">✦</span>
           <span className="mbar-label">Effects</span>
+        </button>
+
+        <button className="mbar-btn" onClick={onSplit} disabled={page !== 'edit'}>
+          <span className="mbar-icon">✂</span>
+          <span className="mbar-label">Split</span>
+        </button>
+
+        <button className="mbar-btn" onClick={onWizard} disabled={!canWizard}>
+          <span className="mbar-icon">🪄</span>
+          <span className="mbar-label">Wizard</span>
         </button>
 
         <button className="mbar-btn" onClick={onUndo} disabled={!canUndo}>
