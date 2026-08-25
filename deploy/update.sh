@@ -23,8 +23,15 @@ cd "$DIR"
 # Safe because shows/, archive/ and data/ are all gitignored, so songs, audio,
 # the archive and settings are never touched by this.
 git fetch origin
-git checkout -B "$BRANCH" "origin/$BRANCH"
+
+# Order matters. `git checkout` refuses to run on a dirty tree, so it must not
+# come first — it would abort with "commit your changes" before the reset ever
+# had a chance to clean up, which is exactly the failure this was meant to fix.
+# Discard local churn, THEN switch, then pin to the remote.
+git reset --hard
+git checkout -f -B "$BRANCH" "origin/$BRANCH"
 git reset --hard "origin/$BRANCH"
+git clean -fd client/dist 2>/dev/null || true
 
 npm install
 npm install --prefix client
