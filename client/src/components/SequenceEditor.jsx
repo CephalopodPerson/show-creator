@@ -6,6 +6,7 @@ import StagePreview from './StagePreview';
 import PaletteSidebar, { COLOR_META, EFFECT_META, usePaletteDrag, DragGhost, useUsage, useCustomColors } from './Palette';
 import WizardPad, { padToSettings } from './WizardPad';
 import useHistory, { useUndoShortcuts } from '../hooks/useHistory';
+import useIsTouch from '../hooks/useTouch';
 import { detectTempo, syncToHz } from '../lib/beats';
 import { api, u } from '../api';
 
@@ -54,6 +55,10 @@ export default function SequenceEditor({ sequence, showName, fixtures, onSave, s
   const [clipboard,   setClipboard]   = useState(null);
   const [popped,      setPopped]      = useState(false);
   const [showPanel,   setShowPanel]   = useState(false);
+  const [page,        setPage]        = useState('edit');   // 'edit' | 'preview'
+  const [armed,       setArmed]       = useState(null);     // touch: tap-to-arm
+
+  const isTouch = useIsTouch();
 
   // Wizard
   const [showWizard,    setShowWizard]    = useState(false);
@@ -287,6 +292,24 @@ export default function SequenceEditor({ sequence, showName, fixtures, onSave, s
   }, [hist, brightness, maxBrightness, bump, bpm]);
 
   const { drag, startDrag } = usePaletteDrag(handleDrop);
+
+  // Touch path: tap a palette chip to arm it, then tap a block to apply. Drag
+  // fights with page scrolling on a phone and hides the target under a thumb.
+  const applyArmed = useCallback((stepId, track) => {
+    if (!armed) return false;
+    const ok = (armed.kind === 'color' || armed.kind === 'effect' || armed.kind === 'flash');
+    if (!ok) return false;
+    handleDrop({ payload: armed, stepId, track, frac: 0.5 });
+    return true;
+  }, [armed, handleDrop]);
+
+  const onBlockTap = useCallback((stepId, track) => {
+    if (isTouch && armed) {
+      applyArmed(stepId, track);
+      return true;    // consumed — don't also select
+    }
+    return false;
+  }, [isTouch, armed, applyArmed]);
 
   // ── Copy / paste of color + effect pairings ──
   const selected = steps.find(s => s.id === selectedId);
@@ -523,14 +546,23 @@ export default function SequenceEditor({ sequence, showName, fixtures, onSave, s
     wsRef.current?.seek(t / duration);
   }
 
-  const preview = (
+  const seekTo = useCallback((t) => {
+    setCurrentTime(t);
+    if (duration > 0) wsRef.current?.seek(t / duration);
+  }, [duration]);
+
+  const preview = (big) => (
     <StagePreview
       steps={steps}
       time={currentTime}
       playing={playing}
+      duration={duration}
       popped={popped}
+      big={big}
       onPopOut={() => setPopped(true)}
       onPopIn={() => setPopped(false)}
+      onTogglePlay={() => wsRef.current?.togglePlay()}
+      onSeek={seekTo}
     />
   );
 
@@ -560,6 +592,9 @@ export default function SequenceEditor({ sequence, showName, fixtures, onSave, s
         onRedo={hist.redo}
         canUndo={hist.canUndo}
         canRedo={hist.canRedo}
+        isTouch={isTouch}
+        armed={armed}
+        onArm={setArmed}
       />
 
       <div className="editor-main">
@@ -567,6 +602,10 @@ export default function SequenceEditor({ sequence, showName, fixtures, onSave, s
       <div className="editor-toolbar">
         {onBack && <button className="btn-ghost" onClick={onBack} title="Back to all songs">← Songs</button>}
         <h2 className="song-title">{sequence.name}</h2>
+        <div className="view-toggle">
+          <button className={`view-btn${page === 'edit' ? ' view-btn-active' : ''}`} onClick={() => setPage('edit')}>✎ Edit</button>
+          <button className={`view-btn${page === 'preview' ? ' view-btn-active' : ''}`} onClick={() => setPage('preview')}>▶ Preview</button>
+        </div>
 
         <div className="zoom-controls">
           <button className="zoom-btn" onClick={() => setZoomIdx(i => Math.max(i - 1, 0))} disabled={zoomIdx === 0} title="Zoom out">－</button>
@@ -596,8 +635,15 @@ export default function SequenceEditor({ sequence, showName, fixtures, onSave, s
 
       {warnings.map((w, i) => <div key={i} className="warning-banner">⚠ {w}</div>)}
 
+      {/* ── Preview page ── */}
+      {page === 'preview' && (
+        <div className="preview-page">
+          {preview(true)}
+        </div>
+      )}
+
       {/* ── Timeline + preview scroll region ── */}
-      <div className="editor-scroll">
+      <div className="editor-scroll" style={page === 'preview' ? { display: 'none' } : undefined}>
       <div className="combined-timeline">
         <div className="labels-col">
           <div className="label-play-cell" style={{ height: WAVEFORM_H }}>
@@ -635,6 +681,8 @@ export default function SequenceEditor({ sequence, showName, fixtures, onSave, s
               onUpdateStep={updateStep}
               onUpdateSteps={updateMany}
               onRemoveEffect={removeEffect}
+              onBlockTap={onBlockTap}
+              dragDisabled={isTouch}
               history={hist}
             />
             <div className="unified-playhead" style={{ left: currentTime * pxPerSec }} />
@@ -643,14 +691,14 @@ export default function SequenceEditor({ sequence, showName, fixtures, onSave, s
       </div>
 
       {/* ── Stage preview: docked or floating ── */}
-      {!popped && preview}
+      {!popped && page === 'edit' && preview(false)}
       </div>
       {popped && (
-        <FloatingPanel onClose={() => setPopped(false)}>{preview}</FloatingPanel>
+        <FloatingPanel onClose={() => setPopped(false)}>{preview(false)}</FloatingPanel>
       )}
 
       {/* ── Details panel ── */}
-      {selected && showPanel && (
+      {selected && showPanel && page === 'edit' && (
         <StepPanel
           step={selected}
           onChange={patch => updateStep(selected.id, patch)}

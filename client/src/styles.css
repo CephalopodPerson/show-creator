@@ -553,13 +553,33 @@ button:disabled { opacity: .42; cursor: not-allowed; }
 .wizard-check-sub { display: block; font-size: 11.5px; color: var(--text-faint); margin-top: 2px; }
 
 /* XY pad */
-.wizpad-wrap { display: flex; flex-direction: column; gap: 11px; }
+.wizpad-wrap { display: flex; flex-direction: column; gap: 8px; }
+.wizpad-frame { display: flex; gap: 8px; }
+.wizpad-ylabels {
+  display: flex; flex-direction: column; justify-content: space-between; align-items: center;
+  padding: 2px 0; flex-shrink: 0; width: 20px;
+}
+.wizpad-xlabels {
+  display: flex; justify-content: space-between; align-items: center;
+  padding-left: 28px;
+}
+.wizpad-end {
+  font-size: 10.5px; font-weight: 700; color: var(--text-dim);
+  text-transform: uppercase; letter-spacing: .05em;
+}
+.wizpad-ylabels .wizpad-end { writing-mode: vertical-rl; text-orientation: mixed; }
+.wizpad-ylabels .wizpad-end:first-child { transform: rotate(180deg); }
+.wizpad-axisname {
+  font-size: 9.5px; color: var(--text-faint); letter-spacing: .08em; text-transform: uppercase;
+}
+.wizpad-ylabels .wizpad-axisname { writing-mode: vertical-rl; transform: rotate(180deg); }
+
 .wizpad {
-  position: relative; width: 100%; aspect-ratio: 1.35;
+  position: relative; flex: 1; aspect-ratio: 1.25;
   border: 1px solid var(--border-2); border-radius: var(--r);
   background:
-    radial-gradient(circle at 12% 88%, rgba(91,91,214,.10), transparent 52%),
-    radial-gradient(circle at 88% 12%, rgba(233,84,120,.15), transparent 52%),
+    linear-gradient(to top, rgba(91,91,214,.13), transparent 55%),
+    linear-gradient(to right, transparent 45%, rgba(233,84,120,.16)),
     var(--panel-2);
   cursor: crosshair; overflow: hidden; touch-action: none; user-select: none;
 }
@@ -569,28 +589,36 @@ button:disabled { opacity: .42; cursor: not-allowed; }
   background-image:
     linear-gradient(to right, var(--border) 1px, transparent 1px),
     linear-gradient(to bottom, var(--border) 1px, transparent 1px);
-  background-size: 25% 25%; opacity: .6;
+  background-size: 33.33% 33.33%; opacity: .5;
 }
+.wizpad-cross { position: absolute; pointer-events: none; background: var(--accent); opacity: .25; }
+.wizpad-cross-v { top: 0; bottom: 0; width: 1px; }
+.wizpad-cross-h { left: 0; right: 0; height: 1px; }
+
 .wizpad-zone {
   position: absolute; transform: translate(-50%, 50%);
-  font-size: 10.5px; font-weight: 600; color: var(--text-faint);
-  pointer-events: none; white-space: nowrap;
+  pointer-events: none; text-align: center; white-space: nowrap;
+  display: flex; flex-direction: column; gap: 1px; transition: opacity .15s;
+  opacity: .55;
 }
+.wizpad-zone-active { opacity: 1; }
+.wizpad-zone-name { font-size: 11px; font-weight: 650; color: var(--text-dim); }
+.wizpad-zone-active .wizpad-zone-name { color: var(--accent); }
+.wizpad-zone-desc { font-size: 9px; color: var(--text-faint); }
+
 .wizpad-puck {
-  position: absolute; width: 26px; height: 26px; border-radius: 50%;
+  position: absolute; width: 24px; height: 24px; border-radius: 50%;
   transform: translate(-50%, 50%); border: 3px solid var(--panel);
   box-shadow: var(--shadow), 0 0 0 1px var(--border-2);
-  pointer-events: none; transition: transform .06s;
+  pointer-events: none; transition: transform .06s; z-index: 4;
 }
-.wizpad-puck-drag { transform: translate(-50%, 50%) scale(1.18); }
-.wizpad-axis { position: absolute; font-size: 10px; color: var(--text-faint); pointer-events: none; letter-spacing: .04em; text-transform: uppercase; font-weight: 600; }
-.wizpad-axis-x { bottom: 6px; left: 50%; transform: translateX(-50%); }
-.wizpad-axis-y { left: 7px; top: 50%; transform: rotate(-90deg) translateX(50%); transform-origin: left center; }
-.wizpad-readout { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
-.wizpad-zonename { font-size: 14px; font-weight: 650; color: var(--text); min-width: 84px; }
-.wizpad-swatches { display: flex; gap: 4px; }
-.wizpad-dot { width: 17px; height: 17px; border-radius: 50%; border: 1px solid var(--border-2); }
-.wizpad-stat { font-size: 11.5px; color: var(--text-dim); background: var(--panel-2); border: 1px solid var(--border); padding: 3px 9px; border-radius: 20px; }
+.wizpad-puck-drag { transform: translate(-50%, 50%) scale(1.2); }
+
+.wizpad-readout { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.wizpad-zonename { font-size: 15px; font-weight: 700; color: var(--text); }
+.wizpad-zonedesc { font-size: 12px; color: var(--text-faint); }
+.wizpad-spacer { flex: 1; }
+.wizpad-stat { font-size: 11px; color: var(--text-dim); background: var(--panel-2); border: 1px solid var(--border); padding: 2px 8px; border-radius: 20px; }
 .wizpad-palettes { display: flex; gap: 6px; flex-wrap: wrap; }
 .pal-btn {
   display: flex; align-items: center; gap: 9px; cursor: pointer;
@@ -602,6 +630,34 @@ button:disabled { opacity: .42; cursor: not-allowed; }
 .pal-btn-active { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); font-weight: 600; }
 .pal-dots { display: flex; padding-right: 5px; }
 .pal-dot { width: 13px; height: 13px; border-radius: 50%; border: 1.5px solid var(--panel); margin-right: -5px; }
+
+/* ── Preview transport & page ── */
+.stage-transport { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
+.stage-play {
+  width: 34px; height: 34px; border-radius: 50%; flex-shrink: 0;
+  background: var(--accent); color: #fff; border: none; cursor: pointer; font-size: 13px;
+  box-shadow: var(--shadow-sm);
+}
+.stage-play:hover { background: var(--accent-hov); }
+.stage-time { font-family: ui-monospace, monospace; font-size: 11.5px; color: var(--text-dim); min-width: 34px; }
+.stage-time-dim { color: var(--text-faint); }
+.stage-scrub { flex: 1; height: 6px; background: var(--panel-3); border-radius: 3px; cursor: pointer; overflow: hidden; }
+.stage-scrub-fill { height: 100%; background: var(--accent); border-radius: 3px; }
+.preview-page { flex: 1; min-height: 0; overflow-y: auto; padding: 20px; display: flex; justify-content: center; }
+.stage-preview-big { width: 100%; max-width: 860px; }
+.stage-preview-big .stage-box { height: min(52vh, 420px); }
+.stage-preview-big .stage-play { width: 44px; height: 44px; font-size: 16px; }
+
+/* ── Touch: tap-to-arm ── */
+.armed-hint {
+  display: flex; align-items: center; gap: 8px;
+  background: var(--accent-soft); border: 1px solid var(--accent-line);
+  border-radius: var(--r-sm); padding: 8px 10px; font-size: 12px; color: var(--accent);
+  position: sticky; top: 0; z-index: 5;
+}
+.armed-dot { width: 14px; height: 14px; border-radius: 50%; border: 1px solid rgba(0,0,0,.15); flex-shrink: 0; }
+.armed-cancel { margin-left: auto; background: none; border: none; color: var(--accent); cursor: pointer; font-size: 12px; }
+.chip-armed { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 /* ── Admin ── */
 .admin-login { display: grid; place-items: center; height: 100%; padding: 20px; }
@@ -671,60 +727,60 @@ button:disabled { opacity: .42; cursor: not-allowed; }
 
 /* ══ Mobile ══════════════════════════════════════════════════════════════ */
 @media (max-width: 860px) {
-  .app-header { padding: 0 12px; gap: 8px; height: 52px; }
+  /* Let the page scroll naturally. Nested overflow containers are the reason
+     scrolling felt broken — on a phone one document scroll beats four. */
+  html, body, #root { height: auto; }
+  .app { height: auto; min-height: 100dvh; overflow: visible; }
+  .app-body { overflow: visible; display: block; }
+  .app-body > * { width: 100%; }
+  .editor-shell { flex-direction: column; height: auto; overflow: visible; }
+  .editor-main { overflow: visible; }
+  .editor-scroll { overflow: visible; }
+  .show-list, .song-picker, .admin-section, .preview-page { overflow: visible; }
+
+  .app-header { padding: 0 12px; gap: 8px; height: 52px; position: sticky; top: 0; z-index: 20; }
   .logo { font-size: 14px; }
   .show-list, .song-picker { padding: 18px 14px; }
   .card-grid, .song-grid { grid-template-columns: 1fr; }
   .song-actions { opacity: 1; }
 
-  /* Sidebar becomes a horizontal strip so it never eats the editor */
-  .editor-shell { flex-direction: column; }
+  /* Sidebar becomes a horizontal strip pinned under the header */
   .editor-sidebar {
-    width: 100%; flex-direction: row; overflow-x: auto; overflow-y: hidden;
+    width: 100%; flex-direction: row; overflow-x: auto; overflow-y: visible;
     border-right: none; border-bottom: 1px solid var(--border);
-    padding: 10px 12px; gap: 16px; flex-shrink: 0;
+    padding: 10px 12px; gap: 16px; align-items: flex-start;
+    position: sticky; top: 52px; z-index: 15;
+    -webkit-overflow-scrolling: touch;
   }
   .side-section { min-width: max-content; }
-  .swatch-grid { grid-template-columns: repeat(7, 34px); }
-  .fx-grid { grid-template-columns: repeat(4, 58px); }
-  .side-bright { min-width: 165px; }
-  .side-tools { grid-template-columns: repeat(4, 1fr); min-width: 240px; }
+  .armed-hint { position: fixed; left: 10px; right: 10px; bottom: 10px; top: auto; z-index: 60; box-shadow: var(--shadow-lg); }
 
-  .labels-col { width: 62px; }
-  .track-label, .label-cell { padding: 0 7px; font-size: 10px; }
+  /* Bigger tap targets */
+  .swatch-grid { grid-template-columns: repeat(8, 38px); gap: 7px; }
+  .fx-grid { grid-template-columns: repeat(4, 62px); }
+  .side-bright { min-width: 170px; }
+  .side-tools { grid-template-columns: repeat(2, 1fr); min-width: 190px; }
+  .tool-btn { padding: 9px 8px; }
+
+  .labels-col { width: 58px; }
+  .track-label, .label-cell { padding: 0 6px; font-size: 10px; }
   .track-tip { display: none; }
   .editor-toolbar { padding: 9px 12px; gap: 7px; }
   .song-title { font-size: 14px; width: 100%; margin-right: 0; }
-  .stage-box { height: 148px; }
-  .float-panel { width: calc(100vw - 24px); left: 12px !important; }
-  .modal-box, .wizard-modal { width: 100%; }
+
+  .stage-box { height: 165px; }
+  .stage-preview-big .stage-box { height: 40vh; }
+  .preview-page { padding: 12px; }
+  .float-panel { width: calc(100vw - 20px); left: 10px !important; }
+
+  .modal-box, .wizard-modal { width: 100%; max-height: 92vh; }
+  .wizard-step { padding: 14px; gap: 12px; }
+  .wizpad { aspect-ratio: 1; }
+  .wizpad-zone-desc { display: none; }          /* names only — descriptions crowd a phone */
+  .wizpad-zone-name { font-size: 10px; }
+  .wizpad-readout { font-size: 12px; }
+  .wizpad-zonename { font-size: 14px; }
+
   .controls-grid { grid-template-columns: 1fr; }
-  .step-panel { max-height: 50vh; }
+  .step-panel { max-height: none; }
 }
-
-/* ── Custom colors, flash blocks, tempo ── */
-.custom-add { display: flex; gap: 6px; align-items: center; }
-.custom-picker { width: 40px; height: 30px; padding: 2px; border: 1px solid var(--border-2); border-radius: var(--r-sm); background: var(--panel); cursor: pointer; flex-shrink: 0; }
-.custom-add .tool-btn { flex: 1; }
-.fx-chip-flash { background: var(--accent-soft); border-color: var(--accent-line); }
-.fx-chip-flash .fx-chip-icon { color: var(--accent); }
-
-.block-fx { position: absolute; top: 2px; left: 3px; display: flex; gap: 2px; z-index: 3; }
-.block-fx .fx-badge { font-size: 10px; padding: 0 4px; line-height: 1.5; background: rgba(0,0,0,.45); color: #fff; border-radius: 3px; }
-.block-fx .fx-badge:hover { background: var(--danger); }
-
-.step-flash {
-  border: 1px solid rgba(255,255,255,.85) !important;
-  box-shadow: 0 0 8px 1px rgba(255,255,255,.55);
-  min-width: 5px;
-}
-.step-flash::after {
-  content: '✦'; position: absolute; inset: 0;
-  display: grid; place-items: center; font-size: 9px;
-  color: rgba(255,255,255,.95); pointer-events: none;
-}
-
-.bpm-row { display: flex; align-items: baseline; gap: 8px; }
-.bpm-value { font-size: 15px; font-weight: 650; color: var(--text); }
-.bpm-conf { font-size: 10.5px; color: var(--ok); }
-.bpm-conf-low { color: var(--warn); }

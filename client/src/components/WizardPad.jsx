@@ -9,12 +9,14 @@ import React, { useRef, useState, useEffect } from 'react';
 //   X: 0 = Smooth (long crossfades, slow drifts)  →  1 = Punchy (hard cuts, flashes, strobe)
 
 export const ZONES = [
-  { key: 'ambient',  label: 'Ambient',   x: 0.17, y: 0.16 },
-  { key: 'lounge',   label: 'Lounge',    x: 0.18, y: 0.50 },
-  { key: 'groove',   label: 'Groove',    x: 0.50, y: 0.50 },
-  { key: 'accent',   label: 'Accent',    x: 0.82, y: 0.20 },
-  { key: 'anthem',   label: 'Anthem',    x: 0.50, y: 0.86 },
-  { key: 'peaktime', label: 'Peak Time', x: 0.85, y: 0.85 },
+  { key: 'ambient',  label: 'Ambient',  desc: 'barely moves',        x: 0.16, y: 0.14 },
+  { key: 'blink',    label: 'Blink',    desc: 'still, but ticking',  x: 0.84, y: 0.14 },
+  { key: 'lounge',   label: 'Lounge',   desc: 'slow drift',          x: 0.16, y: 0.44 },
+  { key: 'groove',   label: 'Groove',   desc: 'steady changes',      x: 0.50, y: 0.50 },
+  { key: 'snap',     label: 'Snap',     desc: 'sharp cuts',          x: 0.84, y: 0.44 },
+  { key: 'swell',    label: 'Swell',    desc: 'big slow builds',     x: 0.16, y: 0.84 },
+  { key: 'anthem',   label: 'Anthem',   desc: 'bright and driving',  x: 0.50, y: 0.86 },
+  { key: 'peaktime', label: 'Peak',     desc: 'flashes and strobe',  x: 0.86, y: 0.86 },
 ];
 
 // ── Palettes: explicit color choice, independent of the pad ──
@@ -88,14 +90,15 @@ function scale(c, f) {
 }
 
 /** Nearest named zone, for the readout. */
-export function zoneLabel(x, y) {
+export function nearestZone(x, y) {
   let best = ZONES[0], bestD = Infinity;
   for (const z of ZONES) {
     const d = (z.x - x) ** 2 + (z.y - y) ** 2;
     if (d < bestD) { bestD = d; best = z; }
   }
-  return best.label;
+  return best;
 }
+export function zoneLabel(x, y) { return nearestZone(x, y).label; }
 
 export function swatchCss(c) {
   const s = (c.brightness ?? 100) / 100;
@@ -137,43 +140,75 @@ export default function WizardPad({ x, y, paletteKey, onChange, onPalette, maxBr
   const cfg = padToSettings(x, y, paletteKey, maxBrightness);
   const swatches = cfg.palette.map(p => swatchCss(p.par));
 
+  const zone = nearestZone(x, y);
+
   return (
     <div className="wizpad-wrap">
-      <div
-        className="wizpad"
-        ref={ref}
-        onPointerDown={down}
-        role="slider"
-        aria-label="Energy and transition character"
-        tabIndex={0}
-        onKeyDown={e => {
-          const s = e.shiftKey ? 0.1 : 0.02;
-          if (e.key === 'ArrowLeft')  { e.preventDefault(); onChange(Math.max(0, x - s), y); }
-          if (e.key === 'ArrowRight') { e.preventDefault(); onChange(Math.min(1, x + s), y); }
-          if (e.key === 'ArrowUp')    { e.preventDefault(); onChange(x, Math.min(1, y + s)); }
-          if (e.key === 'ArrowDown')  { e.preventDefault(); onChange(x, Math.max(0, y - s)); }
-        }}
-      >
-        <div className="wizpad-grid" />
-        {ZONES.map(z => (
-          <span key={z.key} className="wizpad-zone" style={{ left: `${z.x * 100}%`, bottom: `${z.y * 100}%` }}>
-            {z.label}
-          </span>
-        ))}
+      {/* Y axis label sits outside the pad so it never overlaps the zones */}
+      <div className="wizpad-frame">
+        <div className="wizpad-ylabels">
+          <span className="wizpad-end">Hype</span>
+          <span className="wizpad-axisname">Energy</span>
+          <span className="wizpad-end">Chill</span>
+        </div>
+
         <div
-          className={`wizpad-puck${dragging ? ' wizpad-puck-drag' : ''}`}
-          style={{ left: `${x * 100}%`, bottom: `${y * 100}%`, background: swatches[0] }}
-        />
-        <span className="wizpad-axis wizpad-axis-y">Chill → Hype</span>
-        <span className="wizpad-axis wizpad-axis-x">Smooth → Punchy</span>
+          className="wizpad"
+          ref={ref}
+          onPointerDown={down}
+          role="slider"
+          aria-label="Energy and transition character"
+          aria-valuetext={`${zone.label} — ${zone.desc}`}
+          tabIndex={0}
+          onKeyDown={e => {
+            const st = e.shiftKey ? 0.1 : 0.02;
+            if (e.key === 'ArrowLeft')  { e.preventDefault(); onChange(Math.max(0, x - st), y); }
+            if (e.key === 'ArrowRight') { e.preventDefault(); onChange(Math.min(1, x + st), y); }
+            if (e.key === 'ArrowUp')    { e.preventDefault(); onChange(x, Math.min(1, y + st)); }
+            if (e.key === 'ArrowDown')  { e.preventDefault(); onChange(x, Math.max(0, y - st)); }
+          }}
+        >
+          <div className="wizpad-grid" />
+
+          {ZONES.map(z => {
+            const active = z.key === zone.key;
+            return (
+              <span
+                key={z.key}
+                className={`wizpad-zone${active ? ' wizpad-zone-active' : ''}`}
+                style={{ left: `${z.x * 100}%`, bottom: `${z.y * 100}%` }}
+              >
+                <span className="wizpad-zone-name">{z.label}</span>
+                <span className="wizpad-zone-desc">{z.desc}</span>
+              </span>
+            );
+          })}
+
+          {/* Crosshair makes the current position readable at a glance */}
+          <div className="wizpad-cross wizpad-cross-v" style={{ left: `${x * 100}%` }} />
+          <div className="wizpad-cross wizpad-cross-h" style={{ bottom: `${y * 100}%` }} />
+
+          <div
+            className={`wizpad-puck${dragging ? ' wizpad-puck-drag' : ''}`}
+            style={{ left: `${x * 100}%`, bottom: `${y * 100}%`, background: swatches[0] }}
+          />
+        </div>
+      </div>
+
+      {/* X axis labels under the pad, aligned to the pad itself */}
+      <div className="wizpad-xlabels">
+        <span className="wizpad-end">Smooth</span>
+        <span className="wizpad-axisname">Transitions</span>
+        <span className="wizpad-end">Punchy</span>
       </div>
 
       <div className="wizpad-readout">
-        <span className="wizpad-zonename">{zoneLabel(x, y)}</span>
-        <span className="wizpad-stat">~{cfg.targetGap}s sections</span>
-        <span className="wizpad-stat">{cfg.brightness}% bright</span>
-        <span className="wizpad-stat">{cfg.fadeDur}s fades</span>
-        <span className="wizpad-stat">{cfg.punch > 0.66 ? 'flashes' : cfg.punch > 0.33 ? 'pulses' : 'smooth'}</span>
+        <span className="wizpad-zonename">{zone.label}</span>
+        <span className="wizpad-zonedesc">{zone.desc}</span>
+        <span className="wizpad-spacer" />
+        <span className="wizpad-stat">~{cfg.targetGap}s</span>
+        <span className="wizpad-stat">{cfg.brightness}%</span>
+        <span className="wizpad-stat">{cfg.fadeDur}s fade</span>
       </div>
 
       <div>

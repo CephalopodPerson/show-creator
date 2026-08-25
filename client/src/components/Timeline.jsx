@@ -113,6 +113,7 @@ function startResize(e, step, steps, pxPerSec, duration, onUpdateStep, onUpdateS
 export default function Timeline({
   steps, duration, pxPerSec, selectedId, onSelect,
   onUpdateStep, onUpdateSteps, onRemoveEffect, history,
+  onBlockTap, dragDisabled = false,
 }) {
   const totalWidth = pxPerSec * duration;
 
@@ -178,10 +179,24 @@ export default function Timeline({
                   strobe      ? 'step-strobe' : '',
                   step.isFlash ? 'step-flash' : '',
                 ].filter(Boolean).join(' ')}
-                style={{ left, top: 4, width, height: h, background: isOff ? 'transparent' : color }}
+                style={{
+                  left, top: 4, width, height: h,
+                  background: isOff ? 'transparent' : color,
+                  touchAction: dragDisabled ? 'auto' : 'none',
+                  cursor: dragDisabled ? 'pointer' : 'grab',
+                }}
                 {...(droppable ? { 'data-drop-step': step.id, 'data-drop-track': tr.key } : {})}
-                onPointerDown={e => startMove(e, step, steps, pxPerSec, duration, onUpdateStep, onSelect, history)}
-                onClick={e => { e.stopPropagation(); onSelect(step.id); }}
+                onPointerDown={e => {
+                  // On touch, blocks must not capture the pointer or the page
+                  // can't be scrolled. Move/resize is a desktop gesture.
+                  if (dragDisabled) return;
+                  startMove(e, step, steps, pxPerSec, duration, onUpdateStep, onSelect, history);
+                }}
+                onClick={e => {
+                  e.stopPropagation();
+                  if (onBlockTap?.(step.id, tr.key)) return;   // consumed by tap-to-apply
+                  onSelect(step.id);
+                }}
                 title={`${tr.label} @ ${step.time_s}s — drag to move, right edge to resize, drop a color here`}
               >
                 {isOff
@@ -205,12 +220,14 @@ export default function Timeline({
                       <span className="block-label" style={{ color: lightTxt ? '#fff' : '#111' }}>
                         {tr.key === 'memo' ? step.memo : (width > 54 ? `${step.duration_s.toFixed(1)}s` : '')}
                       </span>
-                      <div
-                        className="resize-handle"
-                        onPointerDown={e => startResize(e, step, steps, pxPerSec, duration, onUpdateStep, onUpdateSteps, history)}
-                        onClick={e => e.stopPropagation()}
-                        title="Drag to resize"
-                      />
+                      {!dragDisabled && (
+                        <div
+                          className="resize-handle"
+                          onPointerDown={e => startResize(e, step, steps, pxPerSec, duration, onUpdateStep, onUpdateSteps, history)}
+                          onClick={e => e.stopPropagation()}
+                          title="Drag to resize"
+                        />
+                      )}
                     </>
                 }
               </div>

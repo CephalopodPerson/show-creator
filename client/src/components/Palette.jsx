@@ -203,30 +203,39 @@ export default function PaletteSidebar({
   bpm, bpmConfidence, onDetectBpm, detecting,
   onCopy, onPaste, canPaste, hasSelection,
   onUndo, onRedo, canUndo, canRedo,
+  isTouch = false, armed = null, onArm,
 }) {
   const b = Math.min(brightness, maxBrightness);
   const [picking, setPicking] = useState('#ff8800');
 
+  // On touch, chips arm instead of dragging — then you tap a block to apply.
+  const armProps = (payload) => isTouch
+    ? { onClick: () => onArm?.(armed?.key === payload.key ? null : payload) }
+    : { onPointerDown: e => startDrag(e, payload) };
+  const isArmed = key => isTouch && armed?.key === key;
+
   const Swatch = ({ c }) => (
     <button
-      className="swatch"
+      className={`swatch${isArmed(c.key) ? ' chip-armed' : ''}`}
       style={{ background: c.hex }}
-      onPointerDown={e => startDrag(e, { kind: 'color', key: c.key, label: c.label, hex: c.hex, color: c })}
+      {...armProps({ kind: 'color', key: c.key, label: c.label, hex: c.hex, color: c })}
       onContextMenu={e => {
         if (!c.custom) return;
         e.preventDefault();
         onRemoveColor?.(c.key);
       }}
-      title={c.custom ? `${c.label} — drag onto a block (right-click to remove)` : `${c.label} — drag onto a block`}
+      title={isTouch
+        ? `${c.label} — tap, then tap a block`
+        : (c.custom ? `${c.label} — drag onto a block (right-click to remove)` : `${c.label} — drag onto a block`)}
       type="button"
     />
   );
 
   const FxChip = ({ e }) => (
     <button
-      className="fx-chip"
-      onPointerDown={ev => startDrag(ev, { kind: 'effect', key: e.key, label: e.label, icon: e.icon })}
-      title={`${e.label} — ${e.hint}. Drag onto a Par or Spot block.`}
+      className={`fx-chip${isArmed(e.key) ? ' chip-armed' : ''}`}
+      {...armProps({ kind: 'effect', key: e.key, label: e.label, icon: e.icon })}
+      title={`${e.label} — ${e.hint}. ${isTouch ? 'Tap, then tap a block.' : 'Drag onto a Par or Spot block.'}`}
       type="button"
     >
       <span className="fx-chip-icon">{e.icon}</span>
@@ -236,6 +245,13 @@ export default function PaletteSidebar({
 
   return (
     <aside className="editor-sidebar">
+      {isTouch && armed && (
+        <div className="armed-hint">
+          <span className="armed-dot" style={{ background: armed.hex ?? 'var(--accent)' }} />
+          <span>Tap a block to apply <strong>{armed.label}</strong></span>
+          <button className="armed-cancel" onClick={() => onArm?.(null)}>✕</button>
+        </div>
+      )}
       {/* Frequently used */}
       {(topColors.length > 0 || topEffects.length > 0) && (
         <div className="side-section">
@@ -265,7 +281,7 @@ export default function PaletteSidebar({
 
       {/* Colors */}
       <div className="side-section">
-        <div className="side-title">Colors <span className="side-hint">drag out</span></div>
+        <div className="side-title">Colors <span className="side-hint">{isTouch ? 'tap to pick' : 'drag out'}</span></div>
         <div className="swatch-grid">
           {COLORS.map(c => <Swatch key={c.key} c={c} />)}
         </div>
@@ -294,12 +310,12 @@ export default function PaletteSidebar({
 
       {/* Flash tool + effects */}
       <div className="side-section">
-        <div className="side-title">Effects <span className="side-hint">drag onto a block</span></div>
+        <div className="side-title">Effects <span className="side-hint">{isTouch ? 'tap to pick' : 'drag onto a block'}</span></div>
         <div className="fx-grid">
           <button
-            className="fx-chip fx-chip-flash"
-            onPointerDown={ev => startDrag(ev, { kind: 'flash', key: 'flash', label: 'Flash', icon: FLASH_TOOL.icon })}
-            title="Flash — drop onto a block to punch a quick one-shot hit in at that moment"
+            className={`fx-chip fx-chip-flash${isArmed('flash') ? ' chip-armed' : ''}`}
+            {...armProps({ kind: 'flash', key: 'flash', label: 'Flash', icon: FLASH_TOOL.icon })}
+            title={isTouch ? 'Flash — tap, then tap a block' : 'Flash — drop onto a block to punch in a quick one-shot hit'}
             type="button"
           >
             <span className="fx-chip-icon">{FLASH_TOOL.icon}</span>

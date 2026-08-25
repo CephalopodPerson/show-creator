@@ -16,7 +16,15 @@ function rgbaFrom(c = {}, gain = 1) {
 
 function css({ r, g, b }, a) { return `rgba(${Math.round(r)},${Math.round(g)},${Math.round(b)},${a})`; }
 
-export default function StagePreview({ steps = [], time = 0, playing = false, popped = false, onPopOut, onPopIn }) {
+function fmtT(s) {
+  const m = Math.floor(s / 60);
+  return `${m}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+}
+
+export default function StagePreview({
+  steps = [], time = 0, playing = false, popped = false,
+  onPopOut, onPopIn, onTogglePlay, onSeek, duration = 0, big = false,
+}) {
   const active = useMemo(() => {
     const sorted = [...steps].sort((a, b) => a.time_s - b.time_s);
     return sorted.find(s => time >= s.time_s && time < s.time_s + s.duration_s)
@@ -55,7 +63,7 @@ export default function StagePreview({ steps = [], time = 0, playing = false, po
   const spotA = spotOn ? spot.alpha * fadeGain * pulseGain : 0;
 
   return (
-    <div className="stage-preview">
+    <div className={`stage-preview${big ? " stage-preview-big" : ""}`}>
       <div className="stage-preview-label">
         Stage preview
         {playing && <span className="stage-live">● LIVE</span>}
@@ -109,6 +117,26 @@ export default function StagePreview({ steps = [], time = 0, playing = false, po
         {/* Stage floor line */}
         <div className="stage-floor" />
       </div>
+
+      {onTogglePlay && (
+        <div className="stage-transport">
+          <button className="stage-play" onClick={onTogglePlay} title={playing ? 'Pause' : 'Play'}>
+            {playing ? '⏸' : '▶'}
+          </button>
+          <span className="stage-time">{fmtT(time)}</span>
+          <div
+            className="stage-scrub"
+            onClick={e => {
+              if (!duration || !onSeek) return;
+              const r = e.currentTarget.getBoundingClientRect();
+              onSeek(Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)) * duration);
+            }}
+          >
+            <div className="stage-scrub-fill" style={{ width: duration ? `${(time / duration) * 100}%` : '0%' }} />
+          </div>
+          <span className="stage-time stage-time-dim">{fmtT(duration)}</span>
+        </div>
+      )}
 
       <div className="stage-readout">
         {active ? (
