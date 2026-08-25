@@ -256,16 +256,21 @@ export default function Timeline({
                       <span className="block-label" style={{ color: lightTxt ? '#fff' : '#111' }}>
                         {tr.key === 'memo' ? step.memo : (width > 54 ? `${step.duration_s.toFixed(1)}s` : '')}
                       </span>
-                      {!dragDisabled && (
+                      {/* On touch these appear only for the selected block:
+                          a handle must capture the pointer to drag, and doing
+                          that on every block would swallow page scrolling. */}
+                      {(!dragDisabled || isSelected) && (
                         <>
                           <div
-                            className="resize-handle resize-handle-l"
+                            className={`resize-handle resize-handle-l${dragDisabled ? ' resize-handle-touch' : ''}`}
+                            style={{ touchAction: 'none' }}
                             onPointerDown={e => startResizeLeft(e, step, steps, pxPerSec, onUpdateSteps, history)}
                             onClick={e => e.stopPropagation()}
                             title="Drag to move the start of this block"
                           />
                           <div
-                            className="resize-handle resize-handle-r"
+                            className={`resize-handle resize-handle-r${dragDisabled ? ' resize-handle-touch' : ''}`}
+                            style={{ touchAction: 'none' }}
                             onPointerDown={e => startResize(e, step, steps, pxPerSec, duration, onUpdateStep, onUpdateSteps, history)}
                             onClick={e => e.stopPropagation()}
                             title="Drag to move the end of this block"

@@ -925,3 +925,21 @@ button:disabled { opacity: .42; cursor: not-allowed; }
 .step-block:hover .resize-handle::before { opacity: .75; }
 .step-block.selected .resize-handle::before { opacity: 1; }
 .resize-handle:hover::before { opacity: 1; width: 4px; height: 60%; background: #fff; }
+
+/* Touch resize handles — only rendered on the selected block, so they don't
+   compete with page scrolling. Wider and always visible, since there's no
+   hover to reveal them. */
+.resize-handle-touch { width: 30px; z-index: 8; }
+.resize-handle-touch::before {
+  opacity: 1 !important;
+  width: 5px; height: 62%;
+  background: #fff;
+  box-shadow: 0 0 0 1px rgba(0,0,0,.45), 0 1px 3px rgba(0,0,0,.5);
+}
+.resize-handle-touch.resize-handle-l { left: -6px; }
+.resize-handle-touch.resize-handle-r { right: -6px; }
+
+@media (pointer: coarse) {
+  /* Selected block needs room for the handles to sit proud of its edges */
+  .step-block.selected { overflow: visible; z-index: 7; }
+}
