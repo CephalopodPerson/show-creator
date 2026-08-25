@@ -109,6 +109,42 @@ function startResize(e, step, steps, pxPerSec, duration, onUpdateStep, onUpdateS
   window.addEventListener('pointerup', onUp);
 }
 
+// ── Left-edge drag: move the boundary shared with the previous block ─────────
+function startResizeLeft(e, step, steps, pxPerSec, onUpdateSteps, history) {
+  e.preventDefault(); e.stopPropagation();
+
+  const sorted = [...steps].sort((a, b) => a.time_s - b.time_s);
+  const idx    = sorted.findIndex(s => s.id === step.id);
+  const prev   = idx > 0 ? sorted[idx - 1] : null;
+  if (!prev) return;                      // first block has no boundary to its left
+
+  history?.begin();
+  const origStart = step.time_s;
+  const origDur   = step.duration_s;
+  const prevStart = prev.time_s;
+  const startX    = e.clientX;
+
+  // The boundary can't pass either neighbour's minimum length
+  const minStart = prevStart + 0.2;
+  const maxStart = origStart + origDur - 0.2;
+
+  function onMove(ev) {
+    const raw     = origStart + (ev.clientX - startX) / pxPerSec;
+    const clamped = parseFloat(Math.max(minStart, Math.min(maxStart, raw)).toFixed(2));
+    onUpdateSteps([
+      { id: prev.id, patch: { duration_s: parseFloat((clamped - prevStart).toFixed(2)) } },
+      { id: step.id, patch: { time_s: clamped, duration_s: parseFloat((origStart + origDur - clamped).toFixed(2)) } },
+    ]);
+  }
+  function onUp() {
+    history?.end();
+    window.removeEventListener('pointermove', onMove);
+    window.removeEventListener('pointerup', onUp);
+  }
+  window.addEventListener('pointermove', onMove);
+  window.addEventListener('pointerup', onUp);
+}
+
 // ── Timeline component ────────────────────────────────────────────────────────
 export default function Timeline({
   steps, duration, pxPerSec, selectedId, onSelect,
@@ -197,7 +233,7 @@ export default function Timeline({
                   if (onBlockTap?.(step.id, tr.key)) return;   // consumed by tap-to-apply
                   onSelect(step.id);
                 }}
-                title={`${tr.label} @ ${step.time_s}s — drag to move, right edge to resize, drop a color here`}
+                title={`${tr.label} @ ${step.time_s}s — drag an edge to resize, drop a color on it`}
               >
                 {isOff
                   ? <span className="block-off-label">OFF</span>
@@ -221,12 +257,20 @@ export default function Timeline({
                         {tr.key === 'memo' ? step.memo : (width > 54 ? `${step.duration_s.toFixed(1)}s` : '')}
                       </span>
                       {!dragDisabled && (
-                        <div
-                          className="resize-handle"
-                          onPointerDown={e => startResize(e, step, steps, pxPerSec, duration, onUpdateStep, onUpdateSteps, history)}
-                          onClick={e => e.stopPropagation()}
-                          title="Drag to resize"
-                        />
+                        <>
+                          <div
+                            className="resize-handle resize-handle-l"
+                            onPointerDown={e => startResizeLeft(e, step, steps, pxPerSec, onUpdateSteps, history)}
+                            onClick={e => e.stopPropagation()}
+                            title="Drag to move the start of this block"
+                          />
+                          <div
+                            className="resize-handle resize-handle-r"
+                            onPointerDown={e => startResize(e, step, steps, pxPerSec, duration, onUpdateStep, onUpdateSteps, history)}
+                            onClick={e => e.stopPropagation()}
+                            title="Drag to move the end of this block"
+                          />
+                        </>
                       )}
                     </>
                 }
