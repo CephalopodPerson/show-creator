@@ -7,6 +7,7 @@ import PaletteSidebar, { COLOR_META, EFFECT_META, usePaletteDrag, DragGhost, use
 import WizardPad, { padToSettings } from './WizardPad';
 import useHistory, { useUndoShortcuts } from '../hooks/useHistory';
 import useIsTouch from '../hooks/useTouch';
+import MobileBar from './MobileBar';
 import { detectTempo, syncToHz } from '../lib/beats';
 import { api, u } from '../api';
 
@@ -53,7 +54,8 @@ export default function SequenceEditor({ sequence, showName, fixtures, onSave, s
   const [containerW,  setContainerW]  = useState(0);
   const [brightness,  setBrightness]  = useState(Math.min(50, maxBrightness));
   const [clipboard,   setClipboard]   = useState(null);
-  const [popped,      setPopped]      = useState(false);
+  const [sheet,       setSheet]       = useState(null);   // mobile: null|'colors'|'effects'
+  const [picker,      setPicker]      = useState('#ff8800');
   const [showPanel,   setShowPanel]   = useState(false);
   const [page,        setPage]        = useState('edit');   // 'edit' | 'preview'
   const [armed,       setArmed]       = useState(null);     // touch: tap-to-arm
@@ -341,19 +343,6 @@ export default function SequenceEditor({ sequence, showName, fixtures, onSave, s
 
   useUndoShortcuts({ undo: hist.undo, redo: hist.redo, onCopy: doCopy, onPaste: doPaste });
 
-  // ── Audio upload ──
-  async function uploadAudio(e) {
-    const file = e.target.files[0];
-    if (!file) return;
-    const fd = new FormData();
-    fd.append('audio', file);
-    const res  = await api(`/api/shows/${encodeURIComponent(showName)}/audio`, { method: 'POST', body: fd });
-    const data = await res.json();
-    setWarnings(data.warnings ?? []);
-    setAudioPath(data.path);
-    triggerSave(steps, data.path);
-  }
-
   // ── Split / add at playhead ──
   function splitAtCursor() {
     const sorted = [...steps].sort((a, b) => a.time_s - b.time_s);
@@ -557,10 +546,7 @@ export default function SequenceEditor({ sequence, showName, fixtures, onSave, s
       time={currentTime}
       playing={playing}
       duration={duration}
-      popped={popped}
       big={big}
-      onPopOut={() => setPopped(true)}
-      onPopIn={() => setPopped(false)}
       onTogglePlay={() => wsRef.current?.togglePlay()}
       onSeek={seekTo}
     />
@@ -570,7 +556,7 @@ export default function SequenceEditor({ sequence, showName, fixtures, onSave, s
     <div className="editor-shell">
       <DragGhost drag={drag} />
 
-      <PaletteSidebar
+      {!isTouch && <PaletteSidebar
         startDrag={startDrag}
         brightness={brightness}
         onBrightness={setBrightness}
@@ -592,44 +578,40 @@ export default function SequenceEditor({ sequence, showName, fixtures, onSave, s
         onRedo={hist.redo}
         canUndo={hist.canUndo}
         canRedo={hist.canRedo}
-        isTouch={isTouch}
-        armed={armed}
-        onArm={setArmed}
-      />
+      />}
 
       <div className="editor-main">
       {/* ── Toolbar ── */}
       <div className="editor-toolbar">
-        {onBack && <button className="btn-ghost" onClick={onBack} title="Back to all songs">← Songs</button>}
+        {onBack && <button className="btn-ghost btn-icon-only" onClick={onBack} title="Back to all songs">←</button>}
         <h2 className="song-title">{sequence.name}</h2>
-        <div className="view-toggle">
-          <button className={`view-btn${page === 'edit' ? ' view-btn-active' : ''}`} onClick={() => setPage('edit')}>✎ Edit</button>
-          <button className={`view-btn${page === 'preview' ? ' view-btn-active' : ''}`} onClick={() => setPage('preview')}>▶ Preview</button>
-        </div>
 
-        <div className="zoom-controls">
-          <button className="zoom-btn" onClick={() => setZoomIdx(i => Math.max(i - 1, 0))} disabled={zoomIdx === 0} title="Zoom out">－</button>
-          <button className="zoom-fit" onClick={() => setZoomIdx(0)} title="Fit whole song">
-            {ZOOM_STEPS[zoomIdx] === 1 ? 'Fit' : `${ZOOM_STEPS[zoomIdx]}×`}
-          </button>
-          <button className="zoom-btn" onClick={() => setZoomIdx(i => Math.min(i + 1, ZOOM_STEPS.length - 1))} disabled={zoomIdx === ZOOM_STEPS.length - 1} title="Zoom in">＋</button>
-        </div>
-
-        <label className="btn-secondary file-btn">
-          {audioPath ? '🎵 Change audio' : '🎵 Upload audio'}
-          <input type="file" accept="audio/*" hidden onChange={uploadAudio} />
-        </label>
+        {/* Desktop keeps everything inline; mobile moves tools to the bottom bar */}
+        {!isTouch && (
+          <>
+            <div className="zoom-controls">
+              <button className="zoom-btn" onClick={() => setZoomIdx(i => Math.max(i - 1, 0))} disabled={zoomIdx === 0} title="Zoom out">－</button>
+              <button className="zoom-fit" onClick={() => setZoomIdx(0)} title="Fit whole song">
+                {ZOOM_STEPS[zoomIdx] === 1 ? 'Fit' : `${ZOOM_STEPS[zoomIdx]}×`}
+              </button>
+              <button className="zoom-btn" onClick={() => setZoomIdx(i => Math.min(i + 1, ZOOM_STEPS.length - 1))} disabled={zoomIdx === ZOOM_STEPS.length - 1} title="Zoom in">＋</button>
+            </div>
+            <button className="btn-secondary" onClick={splitAtCursor}>{splitLabel}</button>
+            {selected && (
+              <button className="btn-secondary" onClick={() => setShowPanel(p => !p)} title="Fine controls for the selected block">
+                {showPanel ? '▼ Details' : '▶ Details'}
+              </button>
+            )}
+          </>
+        )}
 
         {audioPath && (
-          <button className="btn-primary" onClick={() => setShowWizard(true)} title="Auto-generate the whole show from the song">
-            🪄 Wizard
+          <button className="btn-primary" onClick={() => setShowWizard(true)} title="Rebuild the whole show from the song">
+            🪄 <span className="btn-text">Wizard</span>
           </button>
         )}
-        <button className="btn-secondary" onClick={splitAtCursor}>{splitLabel}</button>
-        {selected && (
-          <button className="btn-secondary" onClick={() => setShowPanel(p => !p)} title="Fine controls for the selected block">
-            {showPanel ? '▼ Details' : '▶ Details'}
-          </button>
+        {isTouch && (
+          <button className="btn-secondary btn-icon-only" onClick={splitAtCursor} title="Split at the playhead">✂</button>
         )}
       </div>
 
@@ -691,11 +673,8 @@ export default function SequenceEditor({ sequence, showName, fixtures, onSave, s
       </div>
 
       {/* ── Stage preview: docked or floating ── */}
-      {!popped && page === 'edit' && preview(false)}
+      {page === 'edit' && preview(false)}
       </div>
-      {popped && (
-        <FloatingPanel onClose={() => setPopped(false)}>{preview(false)}</FloatingPanel>
-      )}
 
       {/* ── Details panel ── */}
       {selected && showPanel && page === 'edit' && (
@@ -706,6 +685,17 @@ export default function SequenceEditor({ sequence, showName, fixtures, onSave, s
         />
       )}
 
+      {isTouch && (
+        <MobileBar
+          sheet={sheet} onSheet={setSheet}
+          armed={armed} onArm={setArmed}
+          page={page} onPage={setPage}
+          brightness={brightness} onBrightness={setBrightness} maxBrightness={maxBrightness}
+          custom={custom} onAddColor={addColor} onRemoveColor={removeColor}
+          onUndo={hist.undo} canUndo={hist.canUndo}
+          pickerValue={picker} onPickerChange={setPicker}
+        />
+      )}
       </div>{/* /editor-main */}
 
       {/* ── Wizard ── */}
@@ -757,46 +747,6 @@ export default function SequenceEditor({ sequence, showName, fixtures, onSave, s
           </div>
         </div>
       )}
-    </div>
-  );
-}
-
-// ── Draggable floating panel ──────────────────────────────────────────────────
-function FloatingPanel({ children, onClose }) {
-  const [pos, setPos] = useState({ x: window.innerWidth - 460, y: 120 });
-  const dragRef = useRef(null);
-
-  function down(e) {
-    if (e.target.closest('button')) return;   // let the Dock button work
-    dragRef.current = { dx: e.clientX - pos.x, dy: e.clientY - pos.y };
-    e.preventDefault();
-  }
-
-  useEffect(() => {
-    function move(e) {
-      if (!dragRef.current) return;
-      setPos({
-        x: Math.max(0, Math.min(window.innerWidth  - 320, e.clientX - dragRef.current.dx)),
-        y: Math.max(0, Math.min(window.innerHeight - 120, e.clientY - dragRef.current.dy)),
-      });
-    }
-    function up() { dragRef.current = null; }
-    window.addEventListener('pointermove', move);
-    window.addEventListener('pointerup', up);
-    return () => {
-      window.removeEventListener('pointermove', move);
-      window.removeEventListener('pointerup', up);
-    };
-  }, []);
-
-  return (
-    <div className="float-panel" style={{ left: pos.x, top: pos.y }}>
-      <div className="float-grip" onPointerDown={down}>
-        <span className="float-grip-dots">⠿</span>
-        <span className="float-grip-label">Stage preview</span>
-        <button className="float-close" onClick={onClose} title="Dock back into the editor">✕</button>
-      </div>
-      {children}
     </div>
   );
 }

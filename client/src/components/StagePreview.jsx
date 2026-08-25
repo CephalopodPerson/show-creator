@@ -22,15 +22,19 @@ function fmtT(s) {
 }
 
 export default function StagePreview({
-  steps = [], time = 0, playing = false, popped = false,
-  onPopOut, onPopIn, onTogglePlay, onSeek, duration = 0, big = false,
+  steps = [], time = 0, playing = false,
+  onTogglePlay, onSeek, duration = 0, big = false,
 }) {
-  const active = useMemo(() => {
-    const sorted = [...steps].sort((a, b) => a.time_s - b.time_s);
-    return sorted.find(s => time >= s.time_s && time < s.time_s + s.duration_s)
-        ?? sorted.filter(s => s.time_s <= time).pop()
-        ?? null;
-  }, [steps, time]);
+  const sortedSteps = useMemo(
+    () => [...steps].sort((a, b) => a.time_s - b.time_s),
+    [steps]
+  );
+
+  const active = useMemo(() =>
+    sortedSteps.find(s => time >= s.time_s && time < s.time_s + s.duration_s)
+      ?? sortedSteps.filter(s => s.time_s <= time).pop()
+      ?? null,
+  [sortedSteps, time]);
 
   const parOn  = active && active.parEnabled  !== false;
   const spotOn = active && active.spotEnabled !== false;
@@ -69,9 +73,7 @@ export default function StagePreview({
         {playing && <span className="stage-live">● LIVE</span>}
         {active?.memo && <span className="stage-memo">{active.memo}</span>}
         <span className="stage-spacer" />
-        {popped
-          ? <button className="stage-pop" onClick={onPopIn}  title="Dock the preview back into the editor">⤡ Dock</button>
-          : <button className="stage-pop" onClick={onPopOut} title="Pop out into a floating panel you can move around">⤢ Pop out</button>}
+        {active && <span className="stage-section">Block {sortedSteps.indexOf(active) + 1} of {sortedSteps.length}</span>}
       </div>
 
       <div className={`stage-box${strobe ? ' stage-strobe' : ''}`}>
@@ -132,7 +134,23 @@ export default function StagePreview({
               onSeek(Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)) * duration);
             }}
           >
-            <div className="stage-scrub-fill" style={{ width: duration ? `${(time / duration) * 100}%` : '0%' }} />
+            {/* Each block tinted along the bar, so the shape of the show is
+                readable at a glance and you can seek straight to a section */}
+            {duration > 0 && sortedSteps.map(st => {
+              const c = st.color?.par ?? st.par ?? {};
+              return (
+                <div
+                  key={st.id}
+                  className={`stage-seg${st.id === active?.id ? ' stage-seg-on' : ''}${st.isFlash ? ' stage-seg-flash' : ''}`}
+                  style={{
+                    left:  `${(st.time_s / duration) * 100}%`,
+                    width: `${Math.max(0.4, (st.duration_s / duration) * 100)}%`,
+                    background: css(rgbaFrom(c), 0.85),
+                  }}
+                />
+              );
+            })}
+            <div className="stage-scrub-head" style={{ left: duration ? `${(time / duration) * 100}%` : '0%' }} />
           </div>
           <span className="stage-time stage-time-dim">{fmtT(duration)}</span>
         </div>

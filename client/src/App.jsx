@@ -40,35 +40,22 @@ export default function App() {
 
       <header className="app-header">
         <div className="header-left">
-          <span className="logo-mark">◐</span>
-          <h1 className="logo">Show Creator</h1>
-          {view === 'show' && showName && (
-            <>
-              <span className="crumb">/</span>
-              <button className="btn-ghost" onClick={() => { setShowName(null); setView('shows'); }}>
-                Shows
-              </button>
-              <span className="crumb">/</span>
-              <span className="show-name-badge">{showName}</span>
-            </>
-          )}
-          {view === 'admin' && (
-            <>
-              <span className="crumb">/</span>
-              <button className="btn-ghost" onClick={() => setView('shows')}>Shows</button>
-            </>
-          )}
+          {view === 'shows'
+            ? <><span className="logo-mark">◐</span><h1 className="logo">Show Creator</h1></>
+            : <button className="btn-ghost btn-icon-only" onClick={() => { setShowName(null); setView('shows'); }} title="All shows">←</button>}
+          {view === 'show'  && showName && <h1 className="logo">{showName}</h1>}
+          {view === 'admin' && <h1 className="logo">Admin</h1>}
         </div>
 
         <div className="header-right">
           {!isBeta && channel?.otherUrl && (
-            <a className="try-beta" href={channel.otherUrl} title="Try the beta channel — separate data, no risk to live shows">
-              Try beta →
-            </a>
+            <a className="try-beta" href={channel.otherUrl} title="Try the beta channel">Beta</a>
           )}
-          <button className="theme-toggle" onClick={toggleTheme} title={theme === 'light' ? 'Switch to dark mode' : 'Switch to light mode'}>
-            {theme === 'light' ? '☾' : '☀'}
-          </button>
+          <button
+            className="theme-toggle"
+            onClick={toggleTheme}
+            title={theme === 'light' ? 'Dark mode' : 'Light mode'}
+          >{theme === 'light' ? '☾' : '☀'}</button>
         </div>
       </header>
 
