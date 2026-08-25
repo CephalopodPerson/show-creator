@@ -862,3 +862,17 @@ button:disabled { opacity: .42; cursor: not-allowed; }
 @media (pointer: coarse) {
   .app-body { padding-bottom: calc(70px + env(safe-area-inset-bottom)); }
 }
+
+/* ── Stage fixtures as drop targets (desktop) ── */
+.fixture-drop { cursor: copy; padding: 4px 8px; border-radius: 8px; transition: background .12s, box-shadow .12s; }
+.fixture-drop:hover { background: rgba(255,255,255,.06); }
+.fixture-drop.drop-hot {
+  outline: 2px solid var(--accent) !important;
+  outline-offset: 2px;
+  background: rgba(255,255,255,.12);
+  filter: none;   /* the lens glow already reads as highlight; don't double it */
+}
+.stage-drophint {
+  text-transform: none; letter-spacing: 0; font-weight: 400;
+  color: var(--text-faint); font-size: 10.5px;
+}

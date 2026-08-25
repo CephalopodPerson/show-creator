@@ -547,6 +547,7 @@ export default function SequenceEditor({ sequence, showName, fixtures, onSave, s
       playing={playing}
       duration={duration}
       big={big}
+      droppable={!isTouch}
       onTogglePlay={() => wsRef.current?.togglePlay()}
       onSeek={seekTo}
     />

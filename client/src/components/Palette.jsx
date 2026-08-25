@@ -142,9 +142,17 @@ export function usePaletteDrag(onDrop) {
       const target = el?.closest?.('[data-drop-step]');
       clearHot();
       if (target && matches(target, dragRef.current)) {
-        // Fraction across the block, so a flash lands at the moment you drop it
-        const r = target.getBoundingClientRect();
-        const frac = r.width > 0 ? Math.min(1, Math.max(0, (ev.clientX - r.left) / r.width)) : 0;
+        // Fraction across the block, so a flash lands at the moment you drop it.
+        // A target may override this (stage fixtures report the playhead, since
+        // their pixel width has nothing to do with time).
+        const declared = target.getAttribute('data-drop-frac');
+        let frac;
+        if (declared != null) {
+          frac = Math.min(1, Math.max(0, parseFloat(declared) || 0));
+        } else {
+          const r = target.getBoundingClientRect();
+          frac = r.width > 0 ? Math.min(1, Math.max(0, (ev.clientX - r.left) / r.width)) : 0;
+        }
         onDrop?.({
           payload: dragRef.current,
           stepId:  target.getAttribute('data-drop-step'),

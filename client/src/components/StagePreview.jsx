@@ -24,6 +24,7 @@ function fmtT(s) {
 export default function StagePreview({
   steps = [], time = 0, playing = false,
   onTogglePlay, onSeek, duration = 0, big = false,
+  droppable = false,
 }) {
   const sortedSteps = useMemo(
     () => [...steps].sort((a, b) => a.time_s - b.time_s),
@@ -35,6 +36,14 @@ export default function StagePreview({
       ?? sortedSteps.filter(s => s.time_s <= time).pop()
       ?? null,
   [sortedSteps, time]);
+
+  // Drop targets report the playhead's position inside the active block
+  const dropFrac = active && active.duration_s > 0
+    ? Math.min(1, Math.max(0, (time - active.time_s) / active.duration_s))
+    : 0;
+  const dropAttrs = (track) => (droppable && active)
+    ? { 'data-drop-step': active.id, 'data-drop-track': track, 'data-drop-frac': dropFrac }
+    : {};
 
   const parOn  = active && active.parEnabled  !== false;
   const spotOn = active && active.spotEnabled !== false;
@@ -73,6 +82,7 @@ export default function StagePreview({
         {playing && <span className="stage-live">● LIVE</span>}
         {active?.memo && <span className="stage-memo">{active.memo}</span>}
         <span className="stage-spacer" />
+        {droppable && active && <span className="stage-drophint">drop colors on a fixture</span>}
         {active && <span className="stage-section">Block {sortedSteps.indexOf(active) + 1} of {sortedSteps.length}</span>}
       </div>
 
@@ -101,17 +111,17 @@ export default function StagePreview({
         }} />
 
         {/* Fixture bodies */}
-        <div className="fixture fixture-par fixture-par-left">
+        <div className={`fixture fixture-par fixture-par-left${droppable ? ' fixture-drop' : ''}`} {...dropAttrs('par')}>
           <div className="fixture-lens" style={{ background: css(par, Math.max(0.08, parA)), boxShadow: parA > 0.05 ? `0 0 18px 4px ${css(par, parA * 0.8)}` : 'none' }} />
           <span className="fixture-tag">PAR L</span>
         </div>
 
-        <div className="fixture fixture-spot">
+        <div className={`fixture fixture-spot${droppable ? ' fixture-drop' : ''}`} {...dropAttrs('spot')}>
           <div className="fixture-head" style={{ background: css(spot, Math.max(0.08, spotA)), boxShadow: spotA > 0.05 ? `0 0 22px 6px ${css(spot, spotA * 0.85)}` : 'none' }} />
           <span className="fixture-tag">SPOT</span>
         </div>
 
-        <div className="fixture fixture-par fixture-par-right">
+        <div className={`fixture fixture-par fixture-par-right${droppable ? ' fixture-drop' : ''}`} {...dropAttrs('par')}>
           <div className="fixture-lens" style={{ background: css(par, Math.max(0.08, parA)), boxShadow: parA > 0.05 ? `0 0 18px 4px ${css(par, parA * 0.8)}` : 'none' }} />
           <span className="fixture-tag">PAR R</span>
         </div>
