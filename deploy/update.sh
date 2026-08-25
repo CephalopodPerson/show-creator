@@ -15,9 +15,16 @@ esac
 echo "==> Updating $CH ($BRANCH) in $DIR  [base $BASE]"
 cd "$DIR"
 
+# These directories are deployment targets, not working copies — nothing in
+# them is hand-authored. npm install rewrites package-lock.json on every run,
+# which then blocks the next pull with "commit your changes before merge".
+# Resetting to the remote makes the update idempotent instead.
+#
+# Safe because shows/, archive/ and data/ are all gitignored, so songs, audio,
+# the archive and settings are never touched by this.
 git fetch origin
-git checkout "$BRANCH"
-git pull origin "$BRANCH"
+git checkout -B "$BRANCH" "origin/$BRANCH"
+git reset --hard "origin/$BRANCH"
 
 npm install
 npm install --prefix client

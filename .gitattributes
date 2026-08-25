@@ -1,0 +1,9 @@
+# Shell scripts must keep LF endings regardless of the OS they're edited on.
+# The repo lives on a Windows filesystem, and a CRLF .sh fails on Linux with
+# "syntax error near unexpected token $'\r'" — which is what happened to every
+# script in deploy/.
+*.sh text eol=lf
+
+# Same reasoning for anything else executed on the server.
+*.yml  text eol=lf
+*.yaml text eol=lf
