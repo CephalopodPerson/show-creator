@@ -133,6 +133,25 @@ function saveShow(name, data) {
 
 function invalidateShow(name) { showCache.delete(name); }
 
+// Every show must have a code. Runs at startup; also covers restores.
+function ensureCode(name) {
+  const show = loadShow(name);
+  if (!show || show.editCode) return false;
+  show.editCode = generateCode();
+  saveShow(name, show);
+  return true;
+}
+
+function assignMissingCodes() {
+  if (!fs.existsSync(SHOWS_DIR)) return 0;
+  let n = 0;
+  for (const name of fs.readdirSync(SHOWS_DIR)) {
+    if (isSafeName(name) && ensureCode(name)) n++;
+  }
+  if (n) console.log(`Assigned edit code to ${n} existing show(s)`);
+  return n;
+}
+
 // ── Routes ───────────────────────────────────────────────────────────────────
 
 // Which channel is this instance, and where's the other one?
@@ -416,6 +435,7 @@ app.post('/api/archive/:showName/restore', requireAdmin, (req, res) => {
   if (fs.existsSync(dst)) return res.status(409).json({ error: 'A show with that name already exists' });
   fs.renameSync(src, dst);
   invalidateShow(showName);
+  ensureCode(showName);
   res.json({ ok: true });
 });
 
@@ -439,14 +459,34 @@ app.post('/api/archive/:showName/copy', requireAdmin, (req, res) => {
   const dst = showPath(newName);
   if (fs.existsSync(dst)) return res.status(409).json({ error: 'Name already taken' });
   fs.cpSync(src, dst, { recursive: true });
-  // Update name in show.json
-  const jsonPath = path.join(dst, 'show.json');
-  if (fs.existsSync(jsonPath)) {
-    const data = JSON.parse(fs.readFileSync(jsonPath, 'utf8'));
-    data.name = newName; data.updatedAt = new Date().toISOString();
-    fs.writeFileSync(jsonPath, JSON.stringify(data, null, 2));
-  }
+  invalidateShow(newName);
+  const copied = loadShow(newName) ?? { name: newName, sequences: [] };
+  copied.name      = newName;
+  copied.editCode  = generateCode();   // a copy is a new show with its own code
+  copied.updatedAt = new Date().toISOString();
+  saveShow(newName, copied);
   res.json({ ok: true, name: newName });
+});
+
+// ── Admin: view and change edit codes ────────────────────────────────────────
+app.get('/api/admin/codes', requireAdmin, (req, res) => {
+  if (!fs.existsSync(SHOWS_DIR)) return res.json([]);
+  const rows = fs.readdirSync(SHOWS_DIR)
+    .filter(isSafeName)
+    .map(name => ({ name, editCode: loadShow(name)?.editCode }))
+    .filter(r => r.editCode)
+    .sort((a, b) => a.name.localeCompare(b.name));
+  res.json(rows);
+});
+
+app.put('/api/admin/codes/:showName', requireAdmin, (req, res) => {
+  const show = loadShow(req.params.showName);
+  if (!show) return res.status(404).json({ error: 'Show not found' });
+  const c = checkCustomCode(req.body?.editCode);
+  if (!c.ok) return res.status(400).json({ error: 'invalid_code', message: c.message });
+  show.editCode = c.code;
+  saveShow(req.params.showName, show);
+  res.json({ ok: true, editCode: c.code });
 });
 
 // ── Reorder sequences ─────────────────────────────────────────────────────────
@@ -619,4 +659,4 @@ if (process.env.NODE_ENV === 'production') {
   app.get('*', (req, res) => res.sendFile(path.join(CLIENT_DIST, 'index.html')));
 }
 
-module.exports = { app };
+module.exports = { app, assignMissingCodes };
