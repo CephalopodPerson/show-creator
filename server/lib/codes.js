@@ -25,7 +25,8 @@ function isStraightRun(s) {
 }
 
 function checkCustomCode(raw) {
-  const code = String(raw ?? '').trim();
+  if (typeof raw !== 'string') return { ok: false, message: 'Codes must be text.' };
+  const code = raw.trim();
   const n = normalizeCode(code);
   if (n.length < 4) return { ok: false, message: 'Codes need at least 4 characters.' };
   if (code.length > 32) return { ok: false, message: 'Codes can be at most 32 characters.' };

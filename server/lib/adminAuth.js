@@ -1,5 +1,6 @@
 const crypto = require('crypto');
 const { hashPassword, verifyPassword } = require('./password');
+const { createLimiter } = require('./limiter');
 
 const SESSION_MS   = 4 * 60 * 60 * 1000;
 const MAX_FAILURES = 5;
@@ -8,7 +9,7 @@ const MIN_PASSWORD = 8;
 
 function createAdminAuth({ loadSettings, saveSettings }) {
   const sessions = new Map();   // token → { exp, mustChange }
-  const failures = new Map();   // ip → { count, until }
+  const failures = createLimiter({ max: MAX_FAILURES, windowMs: LOCK_MS });   // keyed by ip
 
   function purgeExpired() {
     const now = Date.now();
@@ -49,20 +50,16 @@ function createAdminAuth({ loadSettings, saveSettings }) {
   function login(req, res) {
     const ip  = req.ip;
     const now = Date.now();
-    let f = failures.get(ip);
-    if (f?.until && f.until <= now) { failures.delete(ip); f = undefined; }
-    if (f?.until) {
-      return res.status(429).json({ error: 'locked', retryAfter: Math.ceil((f.until - now) / 1000) });
-    }
+    const lock = failures.check(ip);
+    if (lock.locked) return res.status(429).json({ error: 'locked', retryAfter: lock.retryAfter });
 
     const { ok, legacy } = checkPassword(req.body?.password ?? '');
     if (!ok) {
-      const count = (f?.count ?? 0) + 1;
-      failures.set(ip, { count, until: count >= MAX_FAILURES ? now + LOCK_MS : 0 });
+      failures.fail(ip);
       return res.status(401).json({ error: 'wrong_password' });
     }
 
-    failures.delete(ip);
+    failures.reset(ip);
     purgeExpired();
     const token = crypto.randomUUID();
     sessions.set(token, { exp: now + SESSION_MS, mustChange: legacy });
@@ -70,11 +67,14 @@ function createAdminAuth({ loadSettings, saveSettings }) {
   }
 
   function changePassword(req, res) {
+    const token = req.headers['x-admin-token'];
     const s = sessionFor(req);
     if (!s) return res.status(401).json({ error: 'admin_required' });
 
+    // Once a real password exists, nobody — not even a leftover PIN
+    // session — may replace it without knowing it.
     const { currentPassword, newPassword } = req.body ?? {};
-    if (!s.mustChange && !checkPassword(currentPassword ?? '').ok) {
+    if (loadSettings().adminPasswordHash && !checkPassword(currentPassword ?? '').ok) {
       return res.status(401).json({ error: 'wrong_password', message: 'Current password is incorrect.' });
     }
     if (typeof newPassword !== 'string' || newPassword.length < MIN_PASSWORD) {
@@ -88,6 +88,8 @@ function createAdminAuth({ loadSettings, saveSettings }) {
     delete settings.adminPin;
     saveSettings(settings);
     s.mustChange = false;
+    // Every other session was opened under the old credentials.
+    for (const other of sessions.keys()) if (other !== token) sessions.delete(other);
     res.json({ ok: true });
   }
 

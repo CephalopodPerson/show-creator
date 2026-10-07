@@ -85,3 +85,23 @@ test('settings never expose password material', async () => {
     assert.equal(r.body.adminPasswordSalt, undefined);
   } finally { await t.close(); }
 });
+
+test('a leftover PIN session cannot take over once a password is set', async () => {
+  const t = await startServer();
+  try {
+    const a = (await t.json('POST', '/api/admin/login', { password: '1234' })).body.token;
+    const b = (await t.json('POST', '/api/admin/login', { password: '1234' })).body.token;
+    assert.equal((await t.json('POST', '/api/admin/password', { newPassword: 'owner-password' }, H(a))).status, 200);
+
+    const takeover = await t.json('POST', '/api/admin/password', { newPassword: 'attacker-password' }, H(b));
+    assert.equal(takeover.status, 401);
+    const revoked = await t.json('GET', '/api/archive', undefined, H(b));
+    assert.equal(revoked.status, 401);
+    assert.equal(revoked.body.error, 'admin_required');
+
+    assert.equal((await t.json('GET', '/api/archive', undefined, H(a))).status, 200);
+    const again = await t.json('POST', '/api/admin/login', { password: 'owner-password' });
+    assert.equal(again.status, 200);
+    assert.equal(again.body.mustChangePassword, false);
+  } finally { await t.close(); }
+});

@@ -1,5 +1,9 @@
 const { codesMatch } = require('./codes');
 const { isSafeName } = require('./names');
+const { createLimiter } = require('./limiter');
+
+const MAX_WRONG_CODES = 10;
+const CODE_LOCK_MS    = 60 * 1000;
 
 /** A show as the public API may see it — never the edit code. */
 function publicShow(show) {
@@ -10,14 +14,21 @@ function publicShow(show) {
 
 // One place decides write access. Google sign-in later becomes another
 // "allow" branch here; no route needs to change.
-function createShowAccess({ loadShow, isAdmin }) {
+// Wrong codes are counted per IP across all shows, so guessing is capped.
+function createShowAccess({ loadShow, isAdmin, limiter = createLimiter({ max: MAX_WRONG_CODES, windowMs: CODE_LOCK_MS }) }) {
   function check(req, showName, header) {
     const show = loadShow(showName);
     if (!show) return [404, { error: 'Show not found' }];
     if (isAdmin(req)) return null;
     const given = req.get(header);
     if (!given) return [401, { error: 'code_required', show: showName }];
-    if (!codesMatch(show.editCode, given)) return [403, { error: 'code_wrong', show: showName }];
+    const lock = limiter.check(req.ip);
+    if (lock.locked) return [429, { error: 'locked', retryAfter: lock.retryAfter, show: showName }];
+    if (!codesMatch(show.editCode, given)) {
+      limiter.fail(req.ip);
+      return [403, { error: 'code_wrong', show: showName }];
+    }
+    limiter.reset(req.ip);
     return null;
   }
 

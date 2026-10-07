@@ -272,7 +272,13 @@ app.post('/api/shows', (req, res) => {
 app.post('/api/shows/:showName', requireShowCode, (req, res) => {
   const { showName } = req.params;
   const show = loadShow(showName);
-  if (req.body?.fixtureRoles !== undefined) show.fixtureRoles = req.body.fixtureRoles;
+  const roles = req.body?.fixtureRoles;
+  if (roles !== undefined) {
+    if (roles === null || typeof roles !== 'object' || Array.isArray(roles)) {
+      return res.status(400).json({ error: 'invalid_fixture_roles' });
+    }
+    show.fixtureRoles = roles;
+  }
   show.updatedAt = new Date().toISOString();
   saveShow(showName, show);
   res.json(publicShow(show));

@@ -179,3 +179,69 @@ test('admin writes to a nonexistent show 404 instead of touching the filesystem'
     assert.equal(fs.existsSync(path.join(t.root, 'shows', 'Ghost')), false);
   } finally { await t.close(); }
 });
+
+test('ten wrong codes lock that IP out of code checks for a minute', async () => {
+  const t = await startServer();
+  try {
+    await create(t, 'Guessable', 'Blue Moon');
+    const ip = { 'X-Forwarded-For': '203.0.113.10' };
+    for (let i = 0; i < 10; i++) {
+      const r = await t.json('POST', '/api/shows/Guessable/unlock', {}, { ...ip, ...C(`WRONG-${i}`) });
+      assert.equal(r.status, 403, `attempt ${i + 1}`);
+    }
+    const locked = await t.json('POST', '/api/shows/Guessable/unlock', {}, { ...ip, ...C('Blue Moon') });
+    assert.equal(locked.status, 429);
+    assert.equal(locked.body.error, 'locked');
+    assert.ok(locked.body.retryAfter >= 1 && locked.body.retryAfter <= 60, `retryAfter ${locked.body.retryAfter}`);
+
+    const other = { 'X-Forwarded-For': '203.0.113.11' };
+    assert.equal((await t.json('POST', '/api/shows/Guessable/unlock', {}, { ...other, ...C('Blue Moon') })).status, 200);
+  } finally { await t.close(); }
+});
+
+test('a correct code resets the wrong-code count; missing codes do not count', async () => {
+  const t = await startServer();
+  try {
+    await create(t, 'Resettable', 'Blue Moon');
+    const ip = { 'X-Forwarded-For': '203.0.113.20' };
+    const unlock = code => t.json('POST', '/api/shows/Resettable/unlock', {}, code ? { ...ip, ...C(code) } : ip);
+    for (let i = 0; i < 9; i++) assert.equal((await unlock(`WRONG-${i}`)).status, 403);
+    for (let i = 0; i < 5; i++) assert.equal((await unlock()).status, 401);
+    assert.equal((await unlock('Blue Moon')).status, 200);
+    for (let i = 0; i < 9; i++) assert.equal((await unlock(`WRONG-${i}`)).status, 403);
+    assert.equal((await unlock('Blue Moon')).status, 200);
+  } finally { await t.close(); }
+});
+
+test('fixtureRoles must be a plain object', async () => {
+  const t = await startServer();
+  try {
+    const code = (await create(t, 'Roles')).body.editCode;
+    for (const bad of [null, ['par'], 'par', 7]) {
+      const r = await t.json('POST', '/api/shows/Roles', { fixtureRoles: bad }, C(code));
+      assert.equal(r.status, 400, JSON.stringify(bad));
+      assert.equal(r.body.error, 'invalid_fixture_roles');
+    }
+    assert.equal((await t.json('POST', '/api/shows/Roles', { fixtureRoles: { par: 2 } }, C(code))).status, 200);
+    assert.deepEqual((await t.json('GET', '/api/shows/Roles')).body.fixtureRoles, { par: 2 });
+  } finally { await t.close(); }
+});
+
+test('static guard blocks traversal and encoded paths to show.json', async () => {
+  const t = await startServer();
+  try {
+    const code = (await create(t, 'Vault', 'Blue Moon')).body.editCode;
+    const paths = [
+      '/shows/Vault/uploads/../show.json',
+      '/shows/Vault%2Fuploads%2F..%2Fshow.json',
+      '/shows/%2e%2e/Vault/show.json',
+      '/shows/Vault/show.json',
+    ];
+    for (const p of paths) {
+      const r = await t.raw('GET', p);
+      assert.notEqual(r.status, 200, p);
+      assert.equal(JSON.stringify(r.body).includes(code), false, `${p} leaked the code`);
+      assert.equal(JSON.stringify(r.body).includes('Blue Moon'), false, `${p} leaked the code`);
+    }
+  } finally { await t.close(); }
+});

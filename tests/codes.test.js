@@ -30,3 +30,9 @@ test('codesMatch compares normalized codes', () => {
   assert.equal(codesMatch(undefined, ''), false);
   assert.equal(codesMatch('', ''), false);
 });
+
+test('checkCustomCode rejects non-text input', () => {
+  for (const bad of [{ toString: () => 'Blue Moon' }, ['Blue', 'Moon'], 73915]) {
+    assert.deepEqual(checkCustomCode(bad), { ok: false, message: 'Codes must be text.' });
+  }
+});
