@@ -14,7 +14,9 @@ function publicShow(show) {
 
 // One place decides write access. Google sign-in later becomes another
 // "allow" branch here; no route needs to change.
-// Wrong codes are counted per IP across all shows, so guessing is capped.
+// Wrong codes are counted per IP *per show*: a correct code resets the count,
+// and anyone can create a show (so knows one code) — a per-IP-only count
+// could be reset between guesses with the guesser's own show.
 function createShowAccess({ loadShow, isAdmin, limiter = createLimiter({ max: MAX_WRONG_CODES, windowMs: CODE_LOCK_MS }) }) {
   function check(req, showName, header) {
     const show = loadShow(showName);
@@ -22,13 +24,14 @@ function createShowAccess({ loadShow, isAdmin, limiter = createLimiter({ max: MA
     if (isAdmin(req)) return null;
     const given = req.get(header);
     if (!given) return [401, { error: 'code_required', show: showName }];
-    const lock = limiter.check(req.ip);
+    const key  = `${req.ip}\n${showName}`;
+    const lock = limiter.check(key);
     if (lock.locked) return [429, { error: 'locked', retryAfter: lock.retryAfter, show: showName }];
     if (!codesMatch(show.editCode, given)) {
-      limiter.fail(req.ip);
+      limiter.fail(key);
       return [403, { error: 'code_wrong', show: showName }];
     }
-    limiter.reset(req.ip);
+    limiter.reset(key);
     return null;
   }
 

@@ -245,3 +245,17 @@ test('static guard blocks traversal and encoded paths to show.json', async () =>
     }
   } finally { await t.close(); }
 });
+
+test("knowing your own show's code does not reset the lock on someone else's", async () => {
+  const t = await startServer();
+  try {
+    await create(t, 'Victim', 'Blue Moon');
+    const mine = (await create(t, 'Attacker')).body.editCode;
+    const ip = { 'X-Forwarded-For': '203.0.113.30' };
+    const guess = (show, code) => t.json('POST', `/api/shows/${show}/unlock`, {}, { ...ip, ...C(code) });
+    for (let i = 0; i < 9; i++) assert.equal((await guess('Victim', `WRONG-${i}`)).status, 403);
+    assert.equal((await guess('Attacker', mine)).status, 200);
+    assert.equal((await guess('Victim', 'WRONG-9')).status, 403);
+    assert.equal((await guess('Victim', 'Blue Moon')).status, 429);
+  } finally { await t.close(); }
+});
