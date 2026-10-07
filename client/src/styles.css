@@ -943,3 +943,22 @@ button:disabled { opacity: .42; cursor: not-allowed; }
   /* Selected block needs room for the handles to sit proud of its edges */
   .step-block.selected { overflow: visible; z-index: 7; }
 }
+
+/* ── Show codes ─────────────────────────────────────────────────────────── */
+.code-prompt { max-width: 360px; }
+.code-prompt-title { margin: 0 0 6px; font-size: 16px; }
+.code-prompt-text  { margin: 0 0 12px; color: var(--text-dim); font-size: 13px; }
+.code-prompt-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+.locked-banner {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 14px; font-size: 13px;
+  background: var(--panel-2); border-bottom: 1px solid var(--border); color: var(--text-dim);
+}
+.code-notice {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 10px 14px; font-size: 13px;
+  background: var(--panel-2); border: 1px solid var(--accent); border-radius: 8px; margin: 10px 14px;
+}
+.code-notice strong { font-size: 15px; letter-spacing: 1px; color: var(--accent); }
+.new-show-code { max-width: 150px; font-family: ui-monospace, monospace; }
+.form-error { color: var(--danger, #dc2626); font-size: 12px; margin: 6px 0 0; }

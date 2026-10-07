@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import ShowList   from './components/ShowList';
 import ShowEditor from './components/ShowEditor';
 import AdminPanel from './components/AdminPanel';
+import CodePromptHost from './components/CodePrompt';
 import { api } from './api';
 import './styles.css';
 
@@ -69,6 +70,8 @@ export default function App() {
         {view === 'show'  && <ShowEditor showName={showName} onExit={() => { setShowName(null); setView('shows'); }} />}
         {view === 'admin' && <AdminPanel onBack={() => setView('shows')} />}
       </main>
+
+      <CodePromptHost />
     </div>
   );
 }
