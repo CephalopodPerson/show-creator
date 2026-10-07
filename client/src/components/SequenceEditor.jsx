@@ -81,7 +81,7 @@ export default function SequenceEditor({ sequence, showName, fixtures, onSave, s
   // which would otherwise re-trigger detection on every edit.
   const onSaveRef = useRef(null);
   useEffect(() => {
-    onSaveRef.current = (patch) => onSave({ ...sequence, steps, audioPath, ...patch });
+    onSaveRef.current = (patch, opts) => onSave({ ...sequence, steps, audioPath, ...patch }, opts);
   });
 
   const saveTimer = useRef(null);
@@ -109,7 +109,14 @@ export default function SequenceEditor({ sequence, showName, fixtures, onSave, s
     }, DEBOUNCE_MS);
   }, [sequence, audioPath, onSave]);
 
-  useEffect(() => { triggerSave(steps); /* eslint-disable-next-line */ }, [steps]);
+  // Skip the very first run — it fires on mount with the unchanged steps, and
+  // we don't want opening a song in view-only mode to trigger a save/prompt.
+  const skippedInitialSave = useRef(false);
+  useEffect(() => {
+    if (!skippedInitialSave.current) { skippedInitialSave.current = true; return; }
+    triggerSave(steps);
+  /* eslint-disable-next-line */
+  }, [steps]);
 
   // Seed a full-length step when audio first loads into an empty sequence
   useEffect(() => {
@@ -147,7 +154,7 @@ export default function SequenceEditor({ sequence, showName, fixtures, onSave, s
         const { bpm: found, confidence } = detectTempo(decoded);
         setBpm(found);
         setBpmConf(confidence);
-        onSaveRef.current?.({ bpm: found, bpmConfidence: confidence });
+        onSaveRef.current?.({ bpm: found, bpmConfidence: confidence }, { background: true });
       } catch {
         // Not fatal — effects fall back to a free-running rate
       }
@@ -197,7 +204,7 @@ export default function SequenceEditor({ sequence, showName, fixtures, onSave, s
       const { bpm: found, confidence } = detectTempo(decoded);
       setBpm(found);
       setBpmConf(confidence);
-      onSaveRef.current?.({ bpm: found, bpmConfidence: confidence });
+      onSaveRef.current?.({ bpm: found, bpmConfidence: confidence }, { background: true });
     } catch (err) {
       setWarnings(w => [...w, `Beat detection failed: ${err.message}`]);
     }

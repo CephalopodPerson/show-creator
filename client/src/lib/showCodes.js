@@ -48,22 +48,43 @@ const AUTH_ERRORS = new Set(['code_required', 'code_wrong']);
  * Copying into another show passes { header: 'X-Target-Show-Code' } and the
  * target show's name.
  */
-export async function writeShow(show, path, opts = {}, { header = 'X-Show-Code' } = {}) {
+export async function writeShow(show, path, opts = {}, { header = 'X-Show-Code', prompt = true } = {}) {
+  let code = getCode(show);
+  let fromStorage = !!code;
+
   for (;;) {
     const headers = new Headers(opts.headers);
-    const code  = getCode(show);
     const token = getAdminToken();
     if (code)  headers.set(header, code);
     if (token) headers.set('x-admin-token', token);
 
     const res = await api(path, { ...opts, headers });
-    if (res.status !== 401 && res.status !== 403) return res;
+    if (res.status !== 401 && res.status !== 403) {
+      if (code) setCode(show, code);
+      return res;
+    }
 
     const body = await res.clone().json().catch(() => ({}));
-    if (!AUTH_ERRORS.has(body.error)) return res;
+    if (!AUTH_ERRORS.has(body.error)) {
+      if (code) setCode(show, code);
+      return res;
+    }
+
+    // Background writes (e.g. bpm detection) never interrupt the user with a
+    // prompt — surface the auth error to the caller instead.
+    if (!prompt) return res;
+
+    // A code that came from storage and was rejected is stale (e.g. rotated
+    // by the server) — drop it if the user cancels rather than keep retrying
+    // with a code we know is wrong.
+    const forgetOnCancel = fromStorage && body.error === 'code_wrong';
 
     const entered = await requestCode(show, body.error);
-    if (!entered) throw new CodeCancelled(show);
-    setCode(show, entered);
+    if (!entered) {
+      if (forgetOnCancel) forgetCode(show);
+      throw new CodeCancelled(show);
+    }
+    code = entered;
+    fromStorage = false;
   }
 }

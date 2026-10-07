@@ -41,15 +41,15 @@ export default function ShowEditor({ showName, newCode, onExit }) {
     toastTimer.current = setTimeout(() => setToast(null), 3500);
   }
 
-  const write = (path, opts) => writeShow(showName, path, opts);
+  const write = (path, opts, codeOpts) => writeShow(showName, path, opts, codeOpts);
 
   // JSON write that throws on any non-OK response so callers' catch blocks fire.
-  async function writeJson(path, method, body) {
+  async function writeJson(path, method, body, codeOpts) {
     const res = await write(path, {
       method,
       headers: { 'Content-Type': 'application/json' },
       body: body === undefined ? undefined : JSON.stringify(body),
-    });
+    }, codeOpts);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return res.json();
   }
@@ -78,13 +78,13 @@ export default function ShowEditor({ showName, newCode, onExit }) {
 
   useEffect(() => { if (renameId) renameRef.current?.focus(); }, [renameId]);
 
-  const saveSong = useCallback(async (seq) => {
+  const saveSong = useCallback(async (seq, opts) => {
     setSaving(true);
     try {
-      await writeJson(`${API(showName)}/sequences/${seq.id}`, 'PUT', seq);
+      await writeJson(`${API(showName)}/sequences/${seq.id}`, 'PUT', seq, { prompt: !opts?.background });
       setSongs(prev => prev.map(s => s.id === seq.id ? seq : s));
       setUnlocked(true);
-    } catch (e) { failed(e, 'Auto-save failed'); }
+    } catch (e) { if (!opts?.background) failed(e, 'Auto-save failed'); }
     setSaving(false);
   }, [showName]);
 
@@ -213,7 +213,7 @@ export default function ShowEditor({ showName, newCode, onExit }) {
   // ── Editing one song: full screen ──
   if (openSong) {
     return (
-      <>
+      <div className="show-editor">
         {codeBars}
         <SequenceEditor
           key={openSong.id}
@@ -226,13 +226,13 @@ export default function ShowEditor({ showName, newCode, onExit }) {
         />
         {saving && <div className="save-indicator">Saving…</div>}
         {toast && <div className={`seq-toast seq-toast-${toast.type}`} onClick={() => setToast(null)}>{toast.msg}</div>}
-      </>
+      </div>
     );
   }
 
   // ── Song picker ──
   return (
-    <>
+    <div className="show-editor">
       {codeBars}
     <div className="song-picker">
       <div className="song-picker-head">
@@ -339,6 +339,6 @@ export default function ShowEditor({ showName, newCode, onExit }) {
 
       {toast && <div className={`seq-toast seq-toast-${toast.type}`} onClick={() => setToast(null)}>{toast.msg}</div>}
     </div>
-    </>
+    </div>
   );
 }

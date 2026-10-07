@@ -945,7 +945,12 @@ button:disabled { opacity: .42; cursor: not-allowed; }
 }
 
 /* ── Show codes ─────────────────────────────────────────────────────────── */
-.code-prompt { max-width: 360px; }
+/* Single flex child of .app-body — holds the code notice/locked banner as
+   full-width bars above the editor/picker, which fills the rest of the height. */
+.show-editor { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+.show-editor > .editor-shell,
+.show-editor > .song-picker { flex: 1; min-height: 0; }
+.code-prompt { max-width: 360px; padding: 18px 20px; }
 .code-prompt-title { margin: 0 0 6px; font-size: 16px; }
 .code-prompt-text  { margin: 0 0 12px; color: var(--text-dim); font-size: 13px; }
 .code-prompt-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
