@@ -6,6 +6,7 @@ const fs          = require('fs');
 const compression = require('compression');
 const { v4: uuid } = require('uuid');
 const { parseQxw, extractFixtures, mergeAndWrite } = require('./qlc');
+const { isSafeName, checkNewName, resolveInside } = require('./lib/names');
 
 const app  = express();
 const SHOWS_DIR    = process.env.SHOWS_DIR || path.join(__dirname, '..', 'shows');
@@ -27,6 +28,15 @@ const adminSessions = new Map();
 app.use(compression());
 app.use(cors());
 app.use(express.json());
+
+// Every route with :showName gets the safety rule before any handler —
+// including multer, whose upload destination is built from this param.
+app.param('showName', (req, res, next, name) => {
+  if (!isSafeName(name)) {
+    return res.status(400).json({ error: 'invalid_name', message: 'That show name is not allowed.' });
+  }
+  next();
+});
 
 // ── Settings helpers ──────────────────────────────────────────────────────────
 const DEFAULT_SETTINGS = {
@@ -71,7 +81,7 @@ if (process.env.NODE_ENV === 'production') {
 // File uploads (qxw + audio) go into shows/<showName>/uploads/
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    const showDir = path.join(SHOWS_DIR, req.params.showName, 'uploads');
+    const showDir = path.join(showPath(req.params.showName), 'uploads');
     fs.mkdirSync(showDir, { recursive: true });
     cb(null, showDir);
   },
@@ -80,7 +90,8 @@ const storage = multer.diskStorage({
 const upload = multer({ storage });
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
-function showPath(name)     { return path.join(SHOWS_DIR, name); }
+function showPath(name)    { return resolveInside(SHOWS_DIR, name); }
+function archivePath(name) { return resolveInside(ARCHIVE_DIR, name); }
 function showJsonPath(name) { return path.join(showPath(name), 'show.json'); }
 
 // In-memory show cache keyed by name → { mtimeMs, data }.
@@ -191,7 +202,7 @@ app.get('/api/admin/template', requireAdmin, (req, res) => {
 app.get('/api/shows', (req, res) => {
   if (!fs.existsSync(SHOWS_DIR)) return res.json([]);
   const shows = fs.readdirSync(SHOWS_DIR)
-    .filter(d => fs.statSync(path.join(SHOWS_DIR, d)).isDirectory())
+    .filter(d => isSafeName(d) && fs.statSync(path.join(SHOWS_DIR, d)).isDirectory())
     .map(name => {
       const data = loadShow(name);
       return { name, sequences: data?.sequences?.length ?? 0, updatedAt: data?.updatedAt };
@@ -343,7 +354,7 @@ app.post('/api/shows/:showName/archive', (req, res) => {
   const src = showPath(showName);
   if (!fs.existsSync(src)) return res.status(404).json({ error: 'Show not found' });
   fs.mkdirSync(ARCHIVE_DIR, { recursive: true });
-  const dst = path.join(ARCHIVE_DIR, showName);
+  const dst = archivePath(showName);
   if (fs.existsSync(dst)) fs.rmSync(dst, { recursive: true, force: true });
   fs.renameSync(src, dst);
   invalidateShow(showName);
@@ -354,10 +365,10 @@ app.post('/api/shows/:showName/archive', (req, res) => {
 app.get('/api/archive', requireAdmin, (req, res) => {
   if (!fs.existsSync(ARCHIVE_DIR)) return res.json([]);
   const shows = fs.readdirSync(ARCHIVE_DIR)
-    .filter(d => fs.statSync(path.join(ARCHIVE_DIR, d)).isDirectory())
+    .filter(d => isSafeName(d) && fs.statSync(path.join(ARCHIVE_DIR, d)).isDirectory())
     .map(name => {
       try {
-        const p = path.join(ARCHIVE_DIR, name, 'show.json');
+        const p = path.join(archivePath(name), 'show.json');
         const data = fs.existsSync(p) ? JSON.parse(fs.readFileSync(p, 'utf8')) : {};
         return { name, sequences: data?.sequences?.length ?? 0, updatedAt: data?.updatedAt };
       } catch { return { name, sequences: 0 }; }
@@ -368,7 +379,7 @@ app.get('/api/archive', requireAdmin, (req, res) => {
 // ── Restore show from archive ─────────────────────────────────────────────────
 app.post('/api/archive/:showName/restore', requireAdmin, (req, res) => {
   const { showName } = req.params;
-  const src = path.join(ARCHIVE_DIR, showName);
+  const src = archivePath(showName);
   if (!fs.existsSync(src)) return res.status(404).json({ error: 'Not in archive' });
   const dst = showPath(showName);
   if (fs.existsSync(dst)) return res.status(409).json({ error: 'A show with that name already exists' });
@@ -380,7 +391,7 @@ app.post('/api/archive/:showName/restore', requireAdmin, (req, res) => {
 // ── Hard-delete a show from archive (admin only) ──────────────────────────────
 app.delete('/api/archive/:showName', requireAdmin, (req, res) => {
   const { showName } = req.params;
-  const dir = path.join(ARCHIVE_DIR, showName);
+  const dir = archivePath(showName);
   if (!fs.existsSync(dir)) return res.status(404).json({ error: 'Not in archive' });
   fs.rmSync(dir, { recursive: true, force: true });
   res.json({ ok: true });
@@ -389,9 +400,11 @@ app.delete('/api/archive/:showName', requireAdmin, (req, res) => {
 // ── Copy from archive to active shows ────────────────────────────────────────
 app.post('/api/archive/:showName/copy', requireAdmin, (req, res) => {
   const { showName } = req.params;
-  const src = path.join(ARCHIVE_DIR, showName);
+  const src = archivePath(showName);
   if (!fs.existsSync(src)) return res.status(404).json({ error: 'Not in archive' });
-  const newName = req.body.name || showName + ' (copy)';
+  const check = checkNewName(req.body?.name || `${showName} (copy)`);
+  if (!check.ok) return res.status(400).json({ error: 'invalid_name', message: check.message });
+  const newName = check.name;
   const dst = showPath(newName);
   if (fs.existsSync(dst)) return res.status(409).json({ error: 'Name already taken' });
   fs.cpSync(src, dst, { recursive: true });
@@ -531,9 +544,9 @@ app.post('/api/shows/:showName/export', (req, res) => {
 app.get('/api/storage', (req, res) => {
   if (!fs.existsSync(SHOWS_DIR)) return res.json({ totalBytes: 0, shows: [] });
   const shows = fs.readdirSync(SHOWS_DIR)
-    .filter(d => fs.statSync(path.join(SHOWS_DIR, d)).isDirectory())
+    .filter(d => isSafeName(d) && fs.statSync(path.join(SHOWS_DIR, d)).isDirectory())
     .map(name => {
-      const uploadsDir = path.join(SHOWS_DIR, name, 'uploads');
+      const uploadsDir = path.join(showPath(name), 'uploads');
       const files = fs.existsSync(uploadsDir)
         ? fs.readdirSync(uploadsDir).map(f => {
             const full = path.join(uploadsDir, f);
@@ -554,7 +567,7 @@ app.delete('/api/shows/:showName/uploads/:filename', (req, res) => {
   const { showName, filename } = req.params;
   // Prevent path traversal
   const safe = path.basename(filename);
-  const filePath = path.join(SHOWS_DIR, showName, 'uploads', safe);
+  const filePath = path.join(showPath(showName), 'uploads', safe);
   if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'File not found' });
   fs.unlinkSync(filePath);
 
