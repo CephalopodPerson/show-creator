@@ -9,6 +9,7 @@
     "server": "node server/index.js",
     "client": "cd client && npm run dev",
     "start": "NODE_ENV=production node server/index.js",
+    "test": "node --test tests/*.test.js",
     "electron": "NODE_ENV=production electron .",
     "build:client": "cd client && npm run build",
     "build:win": "npm run build:client && electron-builder --win",
