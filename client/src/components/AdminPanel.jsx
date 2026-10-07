@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../api';
-
-const TOKEN_KEY = 'adminToken';
+import { ADMIN_TOKEN_KEY as TOKEN_KEY, setCode } from '../lib/showCodes';
 
 function adminHeaders() {
   return { 'Content-Type': 'application/json', 'x-admin-token': localStorage.getItem(TOKEN_KEY) ?? '' };
@@ -9,7 +8,7 @@ function adminHeaders() {
 
 // ── Login screen ──────────────────────────────────────────────────────────────
 function LoginForm({ onLogin }) {
-  const [pin, setPin] = useState('');
+  const [password, setPassword] = useState('');
   const [err, setErr] = useState('');
 
   async function submit(e) {
@@ -18,12 +17,17 @@ function LoginForm({ onLogin }) {
     const res = await api('/api/admin/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ pin }),
+      body: JSON.stringify({ password }),
     });
-    if (!res.ok) { setErr('Wrong PIN'); return; }
-    const { token } = await res.json();
+    if (res.status === 429) {
+      const { retryAfter } = await res.json().catch(() => ({}));
+      setErr(`Too many tries — wait ${retryAfter ?? 60} seconds.`);
+      return;
+    }
+    if (!res.ok) { setErr('Wrong password'); return; }
+    const { token, mustChangePassword } = await res.json();
     localStorage.setItem(TOKEN_KEY, token);
-    onLogin(token);
+    onLogin(token, mustChangePassword);
   }
 
   return (
@@ -34,9 +38,9 @@ function LoginForm({ onLogin }) {
           <input
             className="input admin-pin-input"
             type="password"
-            placeholder="PIN"
-            value={pin}
-            onChange={e => setPin(e.target.value)}
+            placeholder="Password"
+            value={password}
+            onChange={e => setPassword(e.target.value)}
             autoFocus
           />
           {err && <p className="admin-error">{err}</p>}
@@ -47,26 +51,68 @@ function LoginForm({ onLogin }) {
   );
 }
 
+// ── Password change (forced first-time, or voluntary) ─────────────────────────
+function PasswordForm({ forced, onDone }) {
+  const [cur, setCur]   = useState('');
+  const [next, setNext] = useState('');
+  const [msg, setMsg]   = useState('');
+
+  async function submit(e) {
+    e.preventDefault();
+    setMsg('');
+    const res = await api('/api/admin/password', {
+      method: 'POST',
+      headers: adminHeaders(),
+      body: JSON.stringify(forced ? { newPassword: next } : { currentPassword: cur, newPassword: next }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) { setMsg('✗ ' + (data.message ?? 'Failed')); return; }
+    setCur(''); setNext('');
+    setMsg('✓ Password changed');
+    onDone?.();
+  }
+
+  return (
+    <form onSubmit={submit} className="admin-pin-form">
+      {!forced && (
+        <input className="input" type="password" placeholder="Current password"
+          value={cur} onChange={e => setCur(e.target.value)} />
+      )}
+      <input className="input" type="password" placeholder="New password (min 8)" autoFocus={forced}
+        value={next} onChange={e => setNext(e.target.value)} />
+      <button className="btn-secondary" disabled={next.length < 8 || (!forced && !cur)}>
+        {forced ? 'Set password' : 'Update password'}
+      </button>
+      {msg && <span className={msg.startsWith('✓') ? 'admin-msg' : 'admin-error'}>{msg}</span>}
+    </form>
+  );
+}
+
 // ── Main admin panel ──────────────────────────────────────────────────────────
 export default function AdminPanel({ onBack }) {
-  const [token,    setToken]    = useState(localStorage.getItem(TOKEN_KEY));
-  const [tab,      setTab]      = useState('settings'); // 'settings' | 'archive'
+  const [token,     setToken]     = useState(localStorage.getItem(TOKEN_KEY));
+  const [mustChange, setMustChange] = useState(false);
+  const [tab,      setTab]      = useState('settings'); // 'settings' | 'archive' | 'codes'
   const [settings, setSettings] = useState(null);
   const [archive,  setArchive]  = useState([]);
   const [saving,   setSaving]   = useState(false);
   const [msg,      setMsg]      = useState('');
   const [copyName, setCopyName] = useState({});  // showName → newName
   const [template, setTemplate] = useState(null);
-  const [pinCur,   setPinCur]   = useState('');
-  const [pinNew,   setPinNew]   = useState('');
-  const [pinMsg,   setPinMsg]   = useState('');
+  const [codes,    setCodes]    = useState([]);
+  const [codeEdit, setCodeEdit] = useState({});
 
   useEffect(() => {
-    if (!token) return;
+    if (!token || mustChange) return;
     api('/api/settings').then(r => r.json()).then(setSettings);
-    api('/api/archive',        { headers: adminHeaders() }).then(r => r.json()).then(setArchive).catch(() => {});
+    api('/api/archive', { headers: adminHeaders() }).then(r => {
+      if (r.status === 401) { localStorage.removeItem(TOKEN_KEY); setToken(null); return []; }
+      if (r.status === 403) { setMustChange(true); return []; }
+      return r.json();
+    }).then(setArchive).catch(() => {});
     api('/api/admin/template', { headers: adminHeaders() }).then(r => r.json()).then(setTemplate).catch(() => {});
-  }, [token]);
+    api('/api/admin/codes', { headers: adminHeaders() }).then(r => r.ok ? r.json() : []).then(setCodes).catch(() => {});
+  }, [token, mustChange]);
 
   async function uploadTemplate(e) {
     const file = e.target.files[0];
@@ -84,19 +130,23 @@ export default function AdminPanel({ onBack }) {
     setTimeout(() => setMsg(''), 3000);
   }
 
-  async function changePin(e) {
-    e.preventDefault();
-    setPinMsg('');
-    const res = await api('/api/admin/pin', {
-      method: 'POST',
-      headers: adminHeaders(),
-      body: JSON.stringify({ currentPin: pinCur, newPin: pinNew }),
+  async function suggestFor(name) {
+    const { code } = await api('/api/codes/suggest').then(r => r.json());
+    setCodeEdit(p => ({ ...p, [name]: code }));
+  }
+
+  async function saveCode(name) {
+    const editCode = codeEdit[name]?.trim();
+    if (!editCode) return;
+    const res = await api(`/api/admin/codes/${encodeURIComponent(name)}`, {
+      method: 'PUT', headers: adminHeaders(), body: JSON.stringify({ editCode }),
     });
-    const data = await res.json();
-    if (!res.ok) { setPinMsg('✗ ' + (data.error ?? 'Failed')); return; }
-    setPinCur(''); setPinNew('');
-    setPinMsg('✓ PIN changed');
-    setTimeout(() => setPinMsg(''), 3000);
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) { setMsg('✗ ' + (data.message ?? 'Could not change code')); setTimeout(() => setMsg(''), 3000); return; }
+    setCodes(prev => prev.map(c => c.name === name ? { ...c, editCode: data.editCode } : c));
+    setCodeEdit(p => ({ ...p, [name]: '' }));
+    setCode(name, data.editCode);   // the admin's own browser keeps working
+    setMsg(`✓ Code changed for "${name}"`); setTimeout(() => setMsg(''), 2500);
   }
 
   async function saveSettings() {
@@ -136,7 +186,18 @@ export default function AdminPanel({ onBack }) {
     else { const e = await res.json(); alert(e.error); }
   }
 
-  if (!token) return <LoginForm onLogin={setToken} />;
+  if (!token) return <LoginForm onLogin={(t, must) => { setToken(t); setMustChange(!!must); }} />;
+  if (mustChange) {
+    return (
+      <div className="admin-login">
+        <div className="admin-login-box">
+          <h2 className="admin-login-title">Set an admin password</h2>
+          <p className="admin-field-hint">The old PIN only works once. Choose a password of at least 8 characters.</p>
+          <PasswordForm forced onDone={() => setMustChange(false)} />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="admin-wrap">
@@ -146,6 +207,7 @@ export default function AdminPanel({ onBack }) {
         <div className="admin-tabs">
           <button className={`admin-tab${tab === 'settings' ? ' admin-tab-active' : ''}`} onClick={() => setTab('settings')}>Settings</button>
           <button className={`admin-tab${tab === 'archive'  ? ' admin-tab-active' : ''}`} onClick={() => setTab('archive')}>Archive ({archive.length})</button>
+          <button className={`admin-tab${tab === 'codes' ? ' admin-tab-active' : ''}`} onClick={() => setTab('codes')}>Show codes</button>
         </div>
         {msg && <span className="admin-msg">{msg}</span>}
       </div>
@@ -209,20 +271,9 @@ export default function AdminPanel({ onBack }) {
             </div>
           )}
 
-          {/* Change PIN */}
-          <h3 className="admin-section-title" style={{ marginTop: 36 }}>Change admin PIN</h3>
-          <form onSubmit={changePin} className="admin-pin-form">
-            <input
-              className="input" type="password" placeholder="Current PIN"
-              value={pinCur} onChange={e => setPinCur(e.target.value)}
-            />
-            <input
-              className="input" type="password" placeholder="New PIN (min 4)"
-              value={pinNew} onChange={e => setPinNew(e.target.value)}
-            />
-            <button className="btn-secondary" disabled={!pinCur || pinNew.length < 4}>Update PIN</button>
-            {pinMsg && <span className={pinMsg.startsWith('✓') ? 'admin-msg' : 'admin-error'}>{pinMsg}</span>}
-          </form>
+          {/* Change password */}
+          <h3 className="admin-section-title" style={{ marginTop: 36 }}>Change admin password</h3>
+          <PasswordForm />
         </div>
       )}
 
@@ -248,6 +299,34 @@ export default function AdminPanel({ onBack }) {
               <div className="archive-actions">
                 <button className="btn-secondary" onClick={() => restoreShow(s.name)}>↩ Restore</button>
                 <button className="btn-danger"    onClick={() => deleteShow(s.name)}>🗑 Delete forever</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {tab === 'codes' && (
+        <div className="admin-section">
+          <h3 className="admin-section-title">Show codes</h3>
+          <p className="admin-field-hint" style={{ marginBottom: 10 }}>
+            Anyone with a show's code can edit or archive it. Changing a code locks out everyone using the old one.
+          </p>
+          {codes.length === 0 && <p className="muted">No shows yet.</p>}
+          {codes.map(c => (
+            <div key={c.name} className="archive-row">
+              <div className="archive-info">
+                <span className="archive-name">{c.name}</span>
+                <span className="archive-meta" style={{ fontFamily: 'ui-monospace, monospace' }}>{c.editCode}</span>
+              </div>
+              <div className="archive-copy-row">
+                <input
+                  className="input archive-copy-input"
+                  placeholder="New code"
+                  value={codeEdit[c.name] ?? ''}
+                  onChange={e => setCodeEdit(p => ({ ...p, [c.name]: e.target.value }))}
+                />
+                <button className="btn-ghost" type="button" onClick={() => suggestFor(c.name)} title="Suggest a code">↻</button>
+                <button className="btn-secondary" onClick={() => saveCode(c.name)} disabled={!codeEdit[c.name]?.trim()}>Change</button>
               </div>
             </div>
           ))}
