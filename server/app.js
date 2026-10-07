@@ -123,9 +123,19 @@ function loadShow(name) {
   } catch { return null; }
 }
 
+// Write a temp file next to show.json and rename it over — a full disk or a
+// crash mid-write leaves the old show.json intact instead of a truncated one.
 function saveShow(name, data) {
   fs.mkdirSync(showPath(name), { recursive: true });
-  fs.writeFileSync(showJsonPath(name), JSON.stringify(data, null, 2));
+  const file = showJsonPath(name);
+  const tmp  = `${file}.tmp`;
+  try {
+    fs.writeFileSync(tmp, JSON.stringify(data, null, 2));
+    fs.renameSync(tmp, file);
+  } catch (e) {
+    try { fs.rmSync(tmp, { force: true }); } catch {}
+    throw e;
+  }
   try {
     showCache.set(name, { mtimeMs: fs.statSync(showJsonPath(name)).mtimeMs, data });
   } catch { showCache.delete(name); }
@@ -146,7 +156,12 @@ function assignMissingCodes() {
   if (!fs.existsSync(SHOWS_DIR)) return 0;
   let n = 0;
   for (const name of fs.readdirSync(SHOWS_DIR)) {
-    if (isSafeName(name) && ensureCode(name)) n++;
+    if (!isSafeName(name)) continue;
+    try {
+      if (ensureCode(name)) n++;
+    } catch (e) {
+      console.error(`Could not assign code to "${name}": ${e.message}`);
+    }
   }
   if (n) console.log(`Assigned edit code to ${n} existing show(s)`);
   return n;
@@ -410,12 +425,24 @@ app.post('/api/shows/:showName/archive', requireShowCode, (req, res) => {
   const src = showPath(showName);
   if (!fs.existsSync(src)) return res.status(404).json({ error: 'Show not found' });
   fs.mkdirSync(ARCHIVE_DIR, { recursive: true });
-  const dst = archivePath(showName);
-  if (fs.existsSync(dst)) fs.rmSync(dst, { recursive: true, force: true });
-  fs.renameSync(src, dst);
+  const archivedAs = freeArchiveName(showName);
+  fs.renameSync(src, archivePath(archivedAs));
   invalidateShow(showName);
-  res.json({ ok: true });
+  res.json({ ok: true, archivedAs });
 });
+
+// Never replace an archived show: anyone can create a show with the same
+// name, so archiving it over the original would destroy someone else's work.
+function freeArchiveName(showName) {
+  if (!fs.existsSync(archivePath(showName))) return showName;
+  const d = new Date();
+  const pad = n => String(n).padStart(2, '0');
+  const stamp = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}${pad(d.getMinutes())}`;
+  const base = `${showName} (archived ${stamp})`;
+  let name = base;
+  for (let i = 2; fs.existsSync(archivePath(name)); i++) name = `${base} ${i}`;
+  return name;
+}
 
 // ── List archived shows ───────────────────────────────────────────────────────
 app.get('/api/archive', requireAdmin, (req, res) => {

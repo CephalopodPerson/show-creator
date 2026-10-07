@@ -63,3 +63,78 @@ test('restore keeps or assigns a code; archive copy gets a fresh one', async () 
     assert.notEqual(codes.Archived, codes.Copied);
   } finally { await t.close(); }
 });
+
+test('a broken show does not stop the others getting codes', async () => {
+  const t = await startServer();
+  try {
+    const garbled = path.join(t.root, 'shows', 'Garbled');
+    fs.mkdirSync(garbled, { recursive: true });
+    fs.writeFileSync(path.join(garbled, 'show.json'), '{ not json');
+    const files = ['Alpha', 'Beta', 'Gamma'].map(n => writeLegacyShow(t.root, n));
+    assert.equal(t.mod.assignMissingCodes(), 3);
+    for (const f of files) assert.ok(JSON.parse(fs.readFileSync(f, 'utf8')).editCode, f);
+  } finally { await t.close(); }
+});
+
+test('a show that cannot be written is logged and skipped', { skip: process.getuid?.() === 0 }, async () => {
+  const t = await startServer();
+  const stuck = path.join(t.root, 'shows', 'Stuck');
+  const logged = [];
+  const origError = console.error;
+  try {
+    const stuckFile = writeLegacyShow(t.root, 'Stuck');
+    const files = ['Alpha', 'Omega'].map(n => writeLegacyShow(t.root, n));
+    fs.chmodSync(stuckFile, 0o444);
+    fs.chmodSync(stuck, 0o555);
+    console.error = (...a) => logged.push(a.join(' '));
+
+    assert.equal(t.mod.assignMissingCodes(), 2);
+    for (const f of files) assert.ok(JSON.parse(fs.readFileSync(f, 'utf8')).editCode, f);
+    assert.ok(logged.some(l => l.startsWith('Could not assign code to "Stuck": ')), logged.join('\n'));
+    assert.equal(JSON.parse(fs.readFileSync(stuckFile, 'utf8')).editCode, undefined);
+  } finally {
+    console.error = origError;
+    fs.chmodSync(stuck, 0o755);
+    await t.close();
+  }
+});
+
+test('saving a show leaves no temp file behind', async () => {
+  const t = await startServer();
+  try {
+    const code = (await t.json('POST', '/api/shows', { name: 'Atomic' })).body.editCode;
+    await t.json('POST', '/api/shows/Atomic/sequences', { name: 'S' }, { 'X-Show-Code': code });
+    const dir = path.join(t.root, 'shows', 'Atomic');
+    assert.deepEqual(fs.readdirSync(dir).filter(f => f.endsWith('.tmp')), []);
+    assert.equal(JSON.parse(fs.readFileSync(path.join(dir, 'show.json'), 'utf8')).sequences.length, 1);
+  } finally { await t.close(); }
+});
+
+test('archiving never overwrites an archived show of the same name', async () => {
+  const t = await startServer();
+  try {
+    const tok = await adminToken(t);
+    const H = { 'x-admin-token': tok };
+    const first = (await t.json('POST', '/api/shows', { name: 'Gala' })).body.editCode;
+    await t.json('POST', '/api/shows/Gala/sequences', { name: 'Original' }, { 'X-Show-Code': first });
+    assert.equal((await t.json('POST', '/api/shows/Gala/archive', undefined, { 'X-Show-Code': first })).status, 200);
+
+    const second = (await t.json('POST', '/api/shows', { name: 'Gala' })).body.editCode;
+    const r = await t.json('POST', '/api/shows/Gala/archive', undefined, { 'X-Show-Code': second });
+    assert.equal(r.status, 200);
+    assert.equal(r.body.ok, true);
+    assert.match(r.body.archivedAs, /^Gala \(archived \d{4}-\d{2}-\d{2} \d{4}\)$/);
+
+    const third = (await t.json('POST', '/api/shows', { name: 'Gala' })).body.editCode;
+    const r3 = await t.json('POST', '/api/shows/Gala/archive', undefined, { 'X-Show-Code': third });
+    assert.equal(r3.status, 200);
+    assert.notEqual(r3.body.archivedAs, r.body.archivedAs);
+
+    const archive = (await t.json('GET', '/api/archive', undefined, H)).body;
+    const byName = Object.fromEntries(archive.map(a => [a.name, a]));
+    assert.equal(byName.Gala?.sequences, 1, 'original archived show kept');
+    assert.ok(byName[r.body.archivedAs], 'second archived under the suffixed name');
+    assert.ok(byName[r3.body.archivedAs], 'third archived under its own name');
+    assert.equal(archive.length, 3);
+  } finally { await t.close(); }
+});
