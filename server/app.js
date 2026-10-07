@@ -310,11 +310,23 @@ app.post('/api/shows/:showName/audio', requireShowCode, upload.single('audio'), 
   });
 });
 
+// Only /<showName>/uploads/<filename> is ever meant to be fetched through
+// this mount. show.json (which carries the edit code) and the exported
+// .qxw both live in the same show directory, so without this guard they'd
+// be served to anyone who knew the show name.
+const SHOWS_STATIC_SHAPE = /^\/[^/]+\/uploads\/[^/]+$/;
+function guardShowsStatic(req, res, next) {
+  let decoded;
+  try { decoded = decodeURIComponent(req.path); } catch { return res.status(404).end(); }
+  if (!SHOWS_STATIC_SHAPE.test(decoded)) return res.status(404).end();
+  next();
+}
+
 // Serve uploaded audio files.
 // Uploads are content-addressed by filename and effectively immutable, so we
 // cache aggressively — this was causing a full re-download of every audio file
 // each time a show page was opened.
-app.use('/shows', express.static(SHOWS_DIR, {
+app.use('/shows', guardShowsStatic, express.static(SHOWS_DIR, {
   maxAge:    '30d',
   etag:      true,
   lastModified: true,

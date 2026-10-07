@@ -135,3 +135,47 @@ test('suggest endpoint returns a fresh code', async () => {
     assert.match(r.body.code, /^[A-Z2-9]{3}-[A-Z2-9]{3}$/);
   } finally { await t.close(); }
 });
+
+test('static /shows mount only serves uploads, never show.json or the edit code', async () => {
+  const t = await startServer();
+  try {
+    const r = await create(t, 'StaticGuard', 'Blue Moon');
+    const code = r.body.editCode;
+
+    const hidden = await t.json('GET', `/shows/${enc('StaticGuard')}/show.json`);
+    assert.equal(hidden.status, 404);
+    assert.equal(JSON.stringify(hidden.body).includes(code), false);
+
+    const fd = new FormData();
+    fd.append('audio', new Blob([Buffer.alloc(600000)]), 'track.mp3');
+    const upload = await fetch(`${t.base}/api/shows/${enc('StaticGuard')}/audio`, {
+      method: 'POST',
+      headers: C(code),
+      body: fd,
+    });
+    assert.equal(upload.status, 200);
+
+    const served = await fetch(`${t.base}/shows/${enc('StaticGuard')}/uploads/track.mp3`);
+    assert.equal(served.status, 200);
+  } finally { await t.close(); }
+});
+
+test('admin writes to a nonexistent show 404 instead of touching the filesystem', async () => {
+  const t = await startServer();
+  try {
+    const tok = await adminToken(t);
+
+    const r = await t.json('POST', '/api/shows/Ghost/sequences', { name: 'x' }, { 'x-admin-token': tok });
+    assert.equal(r.status, 404);
+
+    const fd = new FormData();
+    fd.append('audio', new Blob([Buffer.alloc(600000)]), 'track.mp3');
+    const res = await fetch(`${t.base}/api/shows/Ghost/audio`, {
+      method: 'POST',
+      headers: { 'x-admin-token': tok },
+      body: fd,
+    });
+    assert.equal(res.status, 404);
+    assert.equal(fs.existsSync(path.join(t.root, 'shows', 'Ghost')), false);
+  } finally { await t.close(); }
+});

@@ -12,9 +12,9 @@ function publicShow(show) {
 // "allow" branch here; no route needs to change.
 function createShowAccess({ loadShow, isAdmin }) {
   function check(req, showName, header) {
-    if (isAdmin(req)) return null;
     const show = loadShow(showName);
     if (!show) return [404, { error: 'Show not found' }];
+    if (isAdmin(req)) return null;
     const given = req.get(header);
     if (!given) return [401, { error: 'code_required', show: showName }];
     if (!codesMatch(show.editCode, given)) return [403, { error: 'code_wrong', show: showName }];
