@@ -20,6 +20,7 @@ function useTheme() {
 export default function App() {
   const [view, setView]         = useState('shows');   // 'shows' | 'show' | 'admin'
   const [showName, setShowName] = useState(null);
+  const [newCode, setNewCode]   = useState(null);
   const [channel, setChannel]   = useState(null);
   const [theme, toggleTheme]    = useTheme();
 
@@ -63,11 +64,11 @@ export default function App() {
       <main className="app-body">
         {view === 'shows' && (
           <ShowList
-            onOpen={name => { setShowName(name); setView('show'); }}
+            onOpen={(name, code) => { setShowName(name); setNewCode(code ?? null); setView('show'); }}
             onAdmin={() => setView('admin')}
           />
         )}
-        {view === 'show'  && <ShowEditor showName={showName} onExit={() => { setShowName(null); setView('shows'); }} />}
+        {view === 'show'  && <ShowEditor showName={showName} newCode={newCode} onExit={() => { setShowName(null); setView('shows'); }} />}
         {view === 'admin' && <AdminPanel onBack={() => setView('shows')} />}
       </main>
 

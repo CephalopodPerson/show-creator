@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../api';
+import { writeShow, CodeCancelled } from '../lib/showCodes';
 
 function fmtBytes(b) {
   if (b < 1024)        return `${b} B`;
@@ -36,7 +37,7 @@ export default function StorageManager({ onClose }) {
   async function deleteFile(showName, fileName) {
     setDeleting(true);
     try {
-      await api(`/api/shows/${encodeURIComponent(showName)}/uploads/${encodeURIComponent(fileName)}`, {
+      await writeShow(showName, `/api/shows/${encodeURIComponent(showName)}/uploads/${encodeURIComponent(fileName)}`, {
         method: 'DELETE',
       });
       await load();

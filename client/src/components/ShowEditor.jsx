@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import SequenceEditor from './SequenceEditor';
 import { api } from '../api';
+import { writeShow, getCode, getAdminToken, CodeCancelled } from '../lib/showCodes';
 
 const API = name => `/api/shows/${encodeURIComponent(name)}`;
 
@@ -15,7 +16,7 @@ function fmtDur(s) {
   return `${m}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 }
 
-export default function ShowEditor({ showName, onExit }) {
+export default function ShowEditor({ showName, newCode, onExit }) {
   const [show,      setShow]      = useState(null);
   const [songs,     setSongs]     = useState([]);
   const [openId,    setOpenId]    = useState(null);   // null = picker, else editing
@@ -40,6 +41,33 @@ export default function ShowEditor({ showName, onExit }) {
     toastTimer.current = setTimeout(() => setToast(null), 3500);
   }
 
+  const write = (path, opts) => writeShow(showName, path, opts);
+
+  // JSON write that throws on any non-OK response so callers' catch blocks fire.
+  async function writeJson(path, method, body) {
+    const res = await write(path, {
+      method,
+      headers: { 'Content-Type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return res.json();
+  }
+
+  function failed(e, msg) {
+    showToast(e instanceof CodeCancelled ? 'Not saved — this show is locked' : msg);
+  }
+
+  const [unlocked, setUnlocked] = useState(() => !!getCode(showName) || !!getAdminToken());
+  const [codeNote, setCodeNote] = useState(newCode ?? null);
+
+  async function unlock() {
+    try {
+      const res = await write(`${API(showName)}/unlock`, { method: 'POST' });
+      if (res.ok) setUnlocked(true);
+    } catch { /* cancelled */ }
+  }
+
   useEffect(() => { api('/api/settings').then(r => r.json()).then(setSettings).catch(() => {}); }, []);
 
   useEffect(() => {
@@ -53,13 +81,10 @@ export default function ShowEditor({ showName, onExit }) {
   const saveSong = useCallback(async (seq) => {
     setSaving(true);
     try {
-      await api(`${API(showName)}/sequences/${seq.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(seq),
-      });
+      await writeJson(`${API(showName)}/sequences/${seq.id}`, 'PUT', seq);
       setSongs(prev => prev.map(s => s.id === seq.id ? seq : s));
-    } catch { showToast('Auto-save failed'); }
+      setUnlocked(true);
+    } catch (e) { failed(e, 'Auto-save failed'); }
     setSaving(false);
   }, [showName]);
 
@@ -71,27 +96,21 @@ export default function ShowEditor({ showName, onExit }) {
 
     for (const file of Array.from(files)) {
       try {
-        const seq = await api(`${API(showName)}/sequences`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name: cleanFileName(file.name), steps: [] }),
-        }).then(r => r.json());
+        const seq = await writeJson(`${API(showName)}/sequences`, 'POST', { name: cleanFileName(file.name), steps: [] });
         if (!firstId) firstId = seq.id;
 
         const fd = new FormData();
         fd.append('audio', file);
-        const audio = await api(`${API(showName)}/audio`, { method: 'POST', body: fd }).then(r => r.json());
+        const up = await write(`${API(showName)}/audio`, { method: 'POST', body: fd });
+        if (!up.ok) throw new Error(`HTTP ${up.status}`);
+        const audio = await up.json();
 
-        const updated = await api(`${API(showName)}/sequences/${seq.id}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ...seq, audioPath: audio.path }),
-        }).then(r => r.json());
-
+        const updated = await writeJson(`${API(showName)}/sequences/${seq.id}`, 'PUT', { ...seq, audioPath: audio.path });
         setSongs(prev => [...prev, updated]);
         if (audio.warnings?.length) showToast(audio.warnings[0], 'warn');
-      } catch {
-        showToast(`Could not add ${file.name}`);
+      } catch (e) {
+        failed(e, `Could not add ${file.name}`);
+        if (e instanceof CodeCancelled) break;
       }
     }
     setUploading(false);
@@ -103,21 +122,17 @@ export default function ShowEditor({ showName, onExit }) {
     setRenameId(null);
     if (!name || name === song.name) return;
     try {
-      const updated = await api(`${API(showName)}/sequences/${song.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...song, name }),
-      }).then(r => r.json());
+      const updated = await writeJson(`${API(showName)}/sequences/${song.id}`, 'PUT', { ...song, name });
       setSongs(prev => prev.map(s => s.id === song.id ? updated : s));
-    } catch { showToast('Rename failed'); }
+    } catch (e) { failed(e, 'Rename failed'); }
   }
 
   async function deleteSong(id) {
     setConfirmId(null);
     try {
-      await api(`${API(showName)}/sequences/${id}`, { method: 'DELETE' });
+      await writeJson(`${API(showName)}/sequences/${id}`, 'DELETE');
       setSongs(prev => prev.filter(s => s.id !== id));
-    } catch { showToast('Could not delete'); }
+    } catch (e) { failed(e, 'Could not delete'); }
   }
 
   async function startCopy(id) {
@@ -132,13 +147,14 @@ export default function ShowEditor({ showName, onExit }) {
     const id = copyFor;
     setCopyFor(null);
     try {
-      await api(`${API(showName)}/sequences/${id}/copy`, {
+      const res = await writeShow(target, `${API(showName)}/sequences/${id}/copy`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ targetShow: target }),
-      });
+      }, { header: 'X-Target-Show-Code' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       showToast(`Copied to ${target}`, 'ok');
-    } catch { showToast('Copy failed'); }
+    } catch (e) { showToast(e instanceof CodeCancelled ? `Not copied — “${target}” is locked` : 'Copy failed'); }
   }
 
   async function uploadQxw(e) {
@@ -147,10 +163,11 @@ export default function ShowEditor({ showName, onExit }) {
     const fd = new FormData();
     fd.append('qxw', file);
     try {
-      const data = await api(`${API(showName)}/qxw`, { method: 'POST', body: fd }).then(r => r.json());
+      const res = await write(`${API(showName)}/qxw`, { method: 'POST', body: fd });
+      const data = await res.json();
       if (data.fixtures) { setShow(p => ({ ...p, fixtures: data.fixtures, qxwPath: 'set' })); showToast('Fixture file loaded', 'ok'); }
       else showToast(data.error ?? 'Could not read .qxw');
-    } catch { showToast('Upload failed'); }
+    } catch (e) { failed(e, 'Upload failed'); }
   }
 
   async function exportQxw() {
@@ -179,6 +196,19 @@ export default function ShowEditor({ showName, onExit }) {
   if (openSong) {
     return (
       <>
+        {codeNote && (
+          <div className="code-notice">
+            <span>Code for “{showName}”: <strong>{codeNote}</strong></span>
+            <span>Write it down — anyone with this code can edit or archive the show.</span>
+            <button className="btn-ghost" onClick={() => setCodeNote(null)}>Got it</button>
+          </div>
+        )}
+        {!unlocked && (
+          <div className="locked-banner">
+            <span>🔒 View only — enter this show's code to make changes.</span>
+            <button className="btn-secondary" onClick={unlock}>Unlock</button>
+          </div>
+        )}
         <SequenceEditor
           key={openSong.id}
           sequence={openSong}
@@ -196,6 +226,20 @@ export default function ShowEditor({ showName, onExit }) {
 
   // ── Song picker ──
   return (
+    <>
+      {codeNote && (
+        <div className="code-notice">
+          <span>Code for “{showName}”: <strong>{codeNote}</strong></span>
+          <span>Write it down — anyone with this code can edit or archive the show.</span>
+          <button className="btn-ghost" onClick={() => setCodeNote(null)}>Got it</button>
+        </div>
+      )}
+      {!unlocked && (
+        <div className="locked-banner">
+          <span>🔒 View only — enter this show's code to make changes.</span>
+          <button className="btn-secondary" onClick={unlock}>Unlock</button>
+        </div>
+      )}
     <div className="song-picker">
       <div className="song-picker-head">
         <div>
@@ -301,5 +345,6 @@ export default function ShowEditor({ showName, onExit }) {
 
       {toast && <div className={`seq-toast seq-toast-${toast.type}`} onClick={() => setToast(null)}>{toast.msg}</div>}
     </div>
+    </>
   );
 }

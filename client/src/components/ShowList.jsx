@@ -1,32 +1,52 @@
 import React, { useState, useEffect } from 'react';
 import StorageManager from './StorageManager';
 import { api } from '../api';
+import { writeShow, setCode, CodeCancelled } from '../lib/showCodes';
 
 export default function ShowList({ onOpen, onAdmin }) {
   const [shows,       setShows]       = useState([]);
   const [newName,     setNewName]     = useState('');
   const [confirmArch, setConfirmArch] = useState(null);
   const [showStorage, setShowStorage] = useState(false);
+  const [newCode,     setNewCode]     = useState('');
+  const [formErr,     setFormErr]     = useState('');
+  const [listErr,     setListErr]     = useState('');
 
   useEffect(() => {
     api('/api/shows').then(r => r.json()).then(setShows);
   }, []);
 
+  function suggest() {
+    api('/api/codes/suggest').then(r => r.json()).then(d => setNewCode(d.code)).catch(() => {});
+  }
+  useEffect(suggest, []);
+
   async function createShow() {
     const name = newName.trim();
     if (!name) return;
-    await api(`/api/shows/${encodeURIComponent(name)}`, {
+    setFormErr('');
+    const res = await api('/api/shows', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name }),
+      body: JSON.stringify({ name, editCode: newCode.trim() || undefined }),
     });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) { setFormErr(data.message ?? 'Could not create the show.'); return; }
+    setCode(data.name, data.editCode);
     setNewName('');
-    onOpen(name);
+    suggest();
+    onOpen(data.name, data.editCode);
   }
 
   async function archiveShow(name) {
     setConfirmArch(null);
-    await api(`/api/shows/${encodeURIComponent(name)}/archive`, { method: 'POST' });
-    setShows(prev => prev.filter(s => s.name !== name));
+    setListErr('');
+    try {
+      const res = await writeShow(name, `/api/shows/${encodeURIComponent(name)}/archive`, { method: 'POST' });
+      if (!res.ok) { setListErr(`Could not archive "${name}".`); return; }
+      setShows(prev => prev.filter(s => s.name !== name));
+    } catch (e) {
+      if (!(e instanceof CodeCancelled)) setListErr(`Could not archive "${name}".`);
+    }
   }
 
   return (
@@ -47,9 +67,20 @@ export default function ShowList({ onOpen, onAdmin }) {
           onChange={e => setNewName(e.target.value)}
           onKeyDown={e => e.key === 'Enter' && createShow()}
         />
+        <input
+          className="input new-show-code"
+          placeholder="Edit code"
+          title="Anyone with this code can edit or archive the show"
+          value={newCode}
+          onChange={e => setNewCode(e.target.value)}
+          onKeyDown={e => e.key === 'Enter' && createShow()}
+        />
+        <button className="btn-ghost" type="button" onClick={suggest} title="Suggest another code">↻</button>
         <button className="btn-primary" onClick={createShow}>Create</button>
       </div>
+      {formErr && <p className="form-error">{formErr}</p>}
 
+      {listErr && <p className="form-error">{listErr}</p>}
       <div className="card-grid">
         {shows.map(s => (
           <div key={s.name} className="show-card-wrap">
