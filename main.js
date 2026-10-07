@@ -16,8 +16,11 @@ const PORT = 3847;   // unusual port to avoid clashing with other local servers
 // Set env vars BEFORE requiring the server so it picks them up
 process.env.PORT     = PORT;
 process.env.NODE_ENV = 'production';
-// Store shows in the OS user-data dir (writable, survives app updates)
-process.env.SHOWS_DIR = path.join(app.getPath('userData'), 'shows');
+// Store shows, settings and the archive in the OS user-data dir (writable,
+// survives app updates) — the defaults sit inside the read-only app.asar.
+process.env.SHOWS_DIR   = path.join(app.getPath('userData'), 'shows');
+process.env.DATA_DIR    = path.join(app.getPath('userData'), 'data');
+process.env.ARCHIVE_DIR = path.join(app.getPath('userData'), 'archive');
 
 // ── Start the Express backend ────────────────────────────────────────────────
 require('./server/index.js');

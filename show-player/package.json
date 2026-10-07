@@ -11,7 +11,7 @@
     "appId":       "com.showcreator.player",
     "productName": "Show Player",
     "directories": { "output": "../dist-player" },
-    "files": ["main.js", "server.js", "app.html"],
+    "files": ["main.js", "server.js", "bridge-guard.js", "app.html"],
     "win": {
       "target": [
         { "target": "portable", "arch": ["x64"] },

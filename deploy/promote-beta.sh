@@ -22,6 +22,14 @@ git pull origin main
 git merge origin/beta -m "chore: promote beta to stable"
 git push origin main
 
+# The redeploy runs a data migration on startup — keep a copy to roll back to.
+BACKUP="$HOME/show-creator-backups/$(date +%Y%m%d-%H%M%S)"
+mkdir -p "$BACKUP"
+if [ -d "$STABLE_DIR/shows" ];   then cp -a "$STABLE_DIR/shows"   "$BACKUP/"; fi
+if [ -d "$STABLE_DIR/data" ];    then cp -a "$STABLE_DIR/data"    "$BACKUP/"; fi
+if [ -d "$STABLE_DIR/archive" ]; then cp -a "$STABLE_DIR/archive" "$BACKUP/"; fi
+echo "==> Backed up stable data to $BACKUP"
+
 echo "==> Redeploying stable"
 bash deploy/update.sh stable
 
