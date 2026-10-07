@@ -7,13 +7,13 @@ const compression = require('compression');
 const { v4: uuid } = require('uuid');
 const { parseQxw, extractFixtures, mergeAndWrite } = require('./qlc');
 const { isSafeName, checkNewName, resolveInside } = require('./lib/names');
+const { createAdminAuth } = require('./lib/adminAuth');
 
 const app  = express();
 const SHOWS_DIR    = process.env.SHOWS_DIR || path.join(__dirname, '..', 'shows');
 const ARCHIVE_DIR  = process.env.ARCHIVE_DIR || path.join(__dirname, '..', 'archive');
 const DATA_DIR      = process.env.DATA_DIR || path.join(__dirname, '..', 'data');
 const SETTINGS_FILE = path.join(DATA_DIR, 'settings.json');
-const ADMIN_PIN    = process.env.ADMIN_PIN || '1234';
 
 // ── Release channel ───────────────────────────────────────────────────────────
 // 'stable' or 'beta'. Each channel runs as its own PM2 process on its own port
@@ -22,12 +22,13 @@ const ADMIN_PIN    = process.env.ADMIN_PIN || '1234';
 const CHANNEL     = process.env.CHANNEL === 'beta' ? 'beta' : 'stable';
 const OTHER_URL   = process.env.OTHER_CHANNEL_URL || '';
 
-// In-memory admin sessions (token → expiry)
-const adminSessions = new Map();
-
 app.use(compression());
 app.use(cors());
 app.use(express.json());
+
+// Behind nginx every request arrives from 127.0.0.1; trust its
+// X-Forwarded-For so login lockouts are per visitor, not global.
+app.set('trust proxy', 'loopback');
 
 // Every route with :showName gets the safety rule before any handler —
 // including multer, whose upload destination is built from this param.
@@ -42,7 +43,6 @@ app.param('showName', (req, res, next, name) => {
 const DEFAULT_SETTINGS = {
   defaultBrightness: 45,
   maxBrightness:     60,
-  adminPin:          null,   // null → falls back to ADMIN_PIN env / '1234'
   defaultQxwPath:    null,   // template .qxw applied to new shows
   ledfx: { enabled: false, host: '127.0.0.1', port: 8888, virtuals: [] },
 };
@@ -59,17 +59,14 @@ function saveSettings(data) {
   fs.writeFileSync(SETTINGS_FILE, JSON.stringify(data, null, 2));
 }
 
-function currentPin() {
-  return loadSettings().adminPin || process.env.ADMIN_PIN || '1234';
-}
+const auth = createAdminAuth({ loadSettings, saveSettings });
+const { requireAdmin } = auth;
 
-// ── Admin auth middleware ─────────────────────────────────────────────────────
-function requireAdmin(req, res, next) {
-  const token = req.headers['x-admin-token'];
-  const exp   = adminSessions.get(token);
-  if (!token || !exp || Date.now() > exp) return res.status(401).json({ error: 'Admin auth required' });
-  adminSessions.set(token, Date.now() + 4 * 60 * 60 * 1000); // refresh
-  next();
+const SECRET_SETTINGS = ['adminPin', 'adminPasswordHash', 'adminPasswordSalt'];
+function publicSettings(s) {
+  const out = { ...s };
+  for (const k of SECRET_SETTINGS) delete out[k];
+  return out;
 }
 
 // Serve React build in production (Electron sets CLIENT_DIST to the correct path)
@@ -133,35 +130,16 @@ app.get('/api/channel', (req, res) => {
 
 // Settings — public read strips secrets; admin write
 app.get('/api/settings', (req, res) => {
-  const { adminPin, ...safe } = loadSettings();
-  res.json(safe);
+  res.json(publicSettings(loadSettings()));
 });
 app.put('/api/settings', requireAdmin, (req, res) => {
-  const { adminPin, ...rest } = req.body;   // PIN only changes via its own route
-  const s = { ...loadSettings(), ...rest };
+  const s = { ...loadSettings(), ...publicSettings(req.body ?? {}) };
   saveSettings(s);
-  const { adminPin: _p, ...safe } = s;
-  res.json(safe);
+  res.json(publicSettings(s));
 });
 
-// Admin login
-app.post('/api/admin/login', (req, res) => {
-  if (String(req.body.pin) !== String(currentPin())) return res.status(401).json({ error: 'Wrong PIN' });
-  const token = uuid();
-  adminSessions.set(token, Date.now() + 4 * 60 * 60 * 1000);
-  res.json({ token });
-});
-
-// Change admin PIN
-app.post('/api/admin/pin', requireAdmin, (req, res) => {
-  const { currentPin: cur, newPin } = req.body;
-  if (String(cur) !== String(currentPin())) return res.status(401).json({ error: 'Current PIN is incorrect' });
-  if (!newPin || String(newPin).length < 4) return res.status(400).json({ error: 'New PIN must be at least 4 characters' });
-  const s = loadSettings();
-  s.adminPin = String(newPin);
-  saveSettings(s);
-  res.json({ ok: true });
-});
+app.post('/api/admin/login',    auth.login);
+app.post('/api/admin/password', auth.changePassword);
 
 // Upload a default .qxw template (admin)
 const templateUpload = multer({

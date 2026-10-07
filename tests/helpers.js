@@ -66,4 +66,12 @@ async function startServer({ settings } = {}) {
   };
 }
 
-module.exports = { startServer };
+/** Log in on a fresh server and complete the forced password change. */
+async function adminToken(t) {
+  const login = await t.json('POST', '/api/admin/login', { password: '1234' });
+  const token = login.body.token;
+  await t.json('POST', '/api/admin/password', { newPassword: 'test-password-1' }, { 'x-admin-token': token });
+  return token;
+}
+
+module.exports = { startServer, adminToken };
