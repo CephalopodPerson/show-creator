@@ -8,6 +8,8 @@ const { v4: uuid } = require('uuid');
 const { parseQxw, extractFixtures, mergeAndWrite } = require('./qlc');
 const { isSafeName, checkNewName, resolveInside } = require('./lib/names');
 const { createAdminAuth } = require('./lib/adminAuth');
+const { createShowAccess, publicShow } = require('./lib/showAccess');
+const { generateCode, checkCustomCode } = require('./lib/codes');
 
 const app  = express();
 const SHOWS_DIR    = process.env.SHOWS_DIR || path.join(__dirname, '..', 'shows');
@@ -61,6 +63,16 @@ function saveSettings(data) {
 
 const auth = createAdminAuth({ loadSettings, saveSettings });
 const { requireAdmin } = auth;
+
+// loadShow is a hoisted function declaration further down.
+const { requireShowCode, requireTargetCode } = createShowAccess({ loadShow, isAdmin: auth.isAdmin });
+
+const SEQ_FIELDS = ['name', 'steps', 'audioPath', 'audioDuration', 'bpm', 'bpmConfidence'];
+function pickSeqFields(body) {
+  const out = {};
+  for (const k of SEQ_FIELDS) if (body && body[k] !== undefined) out[k] = body[k];
+  return out;
+}
 
 const SECRET_SETTINGS = ['adminPin', 'adminPasswordHash', 'adminPasswordSalt'];
 function publicSettings(s) {
@@ -192,46 +204,74 @@ app.get('/api/shows', (req, res) => {
 app.get('/api/shows/:showName', (req, res) => {
   const data = loadShow(req.params.showName);
   if (!data) return res.status(404).json({ error: 'Show not found' });
-  res.json(data);
+  res.json(publicShow(data));
 });
 
-// Create or update show metadata
-app.post('/api/shows/:showName', (req, res) => {
-  const { showName } = req.params;
-  const isNew    = !loadShow(showName);
-  const existing = loadShow(showName) ?? { name: showName, sequences: [], createdAt: new Date().toISOString() };
-  const updated  = { ...existing, ...req.body, name: showName, updatedAt: new Date().toISOString() };
+// Suggested code for the create form — one generator for client and server.
+app.get('/api/codes/suggest', (req, res) => res.json({ code: generateCode() }));
 
-  // Brand-new show: seed it with the admin's default .qxw template if one exists
-  if (isNew && !updated.qxwPath) {
-    const s = loadSettings();
-    if (s.defaultQxwPath && fs.existsSync(s.defaultQxwPath)) {
-      try {
-        const uploadsDir = path.join(showPath(showName), 'uploads');
-        fs.mkdirSync(uploadsDir, { recursive: true });
-        const dest = path.join(uploadsDir, 'template.qxw');
-        fs.copyFileSync(s.defaultQxwPath, dest);
-        updated.qxwPath  = dest;
-        updated.fixtures = extractFixtures(parseQxw(dest));
-      } catch (e) {
-        console.error('Template seed failed:', e.message);
-      }
-    }
+// Seed a brand-new show with the admin's default .qxw template, if any.
+function seedTemplate(name, show) {
+  const s = loadSettings();
+  if (!s.defaultQxwPath || !fs.existsSync(s.defaultQxwPath)) return;
+  try {
+    const uploadsDir = path.join(showPath(name), 'uploads');
+    fs.mkdirSync(uploadsDir, { recursive: true });
+    const dest = path.join(uploadsDir, 'template.qxw');
+    fs.copyFileSync(s.defaultQxwPath, dest);
+    show.qxwPath  = dest;
+    show.fixtures = extractFixtures(parseQxw(dest));
+  } catch (e) {
+    console.error('Template seed failed:', e.message);
+  }
+}
+
+// Create a show. The only non-admin response that ever carries the code.
+app.post('/api/shows', (req, res) => {
+  const named = checkNewName(req.body?.name);
+  if (!named.ok) return res.status(400).json({ error: 'invalid_name', message: named.message });
+  const name = named.name;
+  if (fs.existsSync(showPath(name))) {
+    return res.status(409).json({ error: 'name_taken', message: 'A show with that name already exists.' });
   }
 
-  saveShow(showName, updated);
-  res.json(updated);
+  let editCode = generateCode();
+  if (req.body?.editCode) {
+    const c = checkCustomCode(req.body.editCode);
+    if (!c.ok) return res.status(400).json({ error: 'invalid_code', message: c.message });
+    editCode = c.code;
+  }
+
+  const now  = new Date().toISOString();
+  const show = { name, sequences: [], createdAt: now, updatedAt: now, editCode };
+  seedTemplate(name, show);
+  saveShow(name, show);
+  res.status(201).json({ ...publicShow(show), editCode });
 });
 
-// Upload .qxw file — extracts fixtures and stores reference
-app.post('/api/shows/:showName/qxw', upload.single('qxw'), (req, res) => {
+// Update show metadata — only fixtureRoles is client-editable.
+app.post('/api/shows/:showName', requireShowCode, (req, res) => {
   const { showName } = req.params;
+  const show = loadShow(showName);
+  if (req.body?.fixtureRoles !== undefined) show.fixtureRoles = req.body.fixtureRoles;
+  show.updatedAt = new Date().toISOString();
+  saveShow(showName, show);
+  res.json(publicShow(show));
+});
+
+// Lets the client verify a code without changing anything.
+app.post('/api/shows/:showName/unlock', requireShowCode, (req, res) => res.json({ ok: true }));
+
+// Upload .qxw file — extracts fixtures and stores reference
+app.post('/api/shows/:showName/qxw', requireShowCode, upload.single('qxw'), (req, res) => {
+  const { showName } = req.params;
+  if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
   const filePath = req.file.path;
 
   try {
     const doc      = parseQxw(filePath);
     const fixtures = extractFixtures(doc);
-    const show     = loadShow(showName) ?? { name: showName, sequences: [], createdAt: new Date().toISOString() };
+    const show     = loadShow(showName);
     show.qxwPath   = filePath;
     show.fixtures  = fixtures;
     show.updatedAt = new Date().toISOString();
@@ -243,8 +283,9 @@ app.post('/api/shows/:showName/qxw', upload.single('qxw'), (req, res) => {
 });
 
 // Upload audio file for a sequence
-app.post('/api/shows/:showName/audio', upload.single('audio'), (req, res) => {
+app.post('/api/shows/:showName/audio', requireShowCode, upload.single('audio'), (req, res) => {
   const { showName } = req.params;
+  if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
   const file = req.file;
 
   // Basic DRM / quality check
@@ -290,10 +331,10 @@ app.get('/api/shows/:showName/sequences', (req, res) => {
 });
 
 // Create a new sequence
-app.post('/api/shows/:showName/sequences', (req, res) => {
+app.post('/api/shows/:showName/sequences', requireShowCode, (req, res) => {
   const { showName } = req.params;
-  const show = loadShow(showName) ?? { name: showName, sequences: [], createdAt: new Date().toISOString() };
-  const seq  = { id: uuid(), name: req.body.name ?? 'New Sequence', steps: [], ...req.body, createdAt: new Date().toISOString() };
+  const show = loadShow(showName);
+  const seq  = { id: uuid(), name: 'New Sequence', steps: [], ...pickSeqFields(req.body), createdAt: new Date().toISOString() };
   show.sequences = [...(show.sequences ?? []), seq];
   show.updatedAt = new Date().toISOString();
   saveShow(showName, show);
@@ -301,7 +342,7 @@ app.post('/api/shows/:showName/sequences', (req, res) => {
 });
 
 // Update a sequence (auto-save)
-app.put('/api/shows/:showName/sequences/:seqId', (req, res) => {
+app.put('/api/shows/:showName/sequences/:seqId', requireShowCode, (req, res) => {
   const { showName, seqId } = req.params;
   const show = loadShow(showName);
   if (!show) return res.status(404).json({ error: 'Show not found' });
@@ -309,14 +350,14 @@ app.put('/api/shows/:showName/sequences/:seqId', (req, res) => {
   const idx = show.sequences.findIndex(s => s.id === seqId);
   if (idx === -1) return res.status(404).json({ error: 'Sequence not found' });
 
-  show.sequences[idx] = { ...show.sequences[idx], ...req.body, id: seqId, updatedAt: new Date().toISOString() };
+  show.sequences[idx] = { ...show.sequences[idx], ...pickSeqFields(req.body), id: seqId, updatedAt: new Date().toISOString() };
   show.updatedAt = new Date().toISOString();
   saveShow(showName, show);
   res.json(show.sequences[idx]);
 });
 
 // Delete a sequence
-app.delete('/api/shows/:showName/sequences/:seqId', (req, res) => {
+app.delete('/api/shows/:showName/sequences/:seqId', requireShowCode, (req, res) => {
   const { showName, seqId } = req.params;
   const show = loadShow(showName);
   if (!show) return res.status(404).json({ error: 'Show not found' });
@@ -327,7 +368,7 @@ app.delete('/api/shows/:showName/sequences/:seqId', (req, res) => {
 });
 
 // ── Archive a show (moves to archive dir) ────────────────────────────────────
-app.post('/api/shows/:showName/archive', (req, res) => {
+app.post('/api/shows/:showName/archive', requireShowCode, (req, res) => {
   const { showName } = req.params;
   const src = showPath(showName);
   if (!fs.existsSync(src)) return res.status(404).json({ error: 'Show not found' });
@@ -397,9 +438,10 @@ app.post('/api/archive/:showName/copy', requireAdmin, (req, res) => {
 });
 
 // ── Reorder sequences ─────────────────────────────────────────────────────────
-app.patch('/api/shows/:showName/sequences/order', (req, res) => {
+app.patch('/api/shows/:showName/sequences/order', requireShowCode, (req, res) => {
   const { showName } = req.params;
   const { ids } = req.body;   // array of sequence ids in new order
+  if (!Array.isArray(ids)) return res.status(400).json({ error: 'ids must be an array' });
   const show = loadShow(showName);
   if (!show) return res.status(404).json({ error: 'Show not found' });
   const map = Object.fromEntries(show.sequences.map(s => [s.id, s]));
@@ -410,7 +452,7 @@ app.patch('/api/shows/:showName/sequences/order', (req, res) => {
 });
 
 // ── Copy a sequence to another show ──────────────────────────────────────────
-app.post('/api/shows/:showName/sequences/:seqId/copy', (req, res) => {
+app.post('/api/shows/:showName/sequences/:seqId/copy', requireTargetCode, (req, res) => {
   const { showName, seqId } = req.params;
   const { targetShow } = req.body;
   if (!targetShow) return res.status(400).json({ error: 'targetShow required' });
@@ -425,7 +467,7 @@ app.post('/api/shows/:showName/sequences/:seqId/copy', (req, res) => {
 
   // Deep-copy, give a fresh id, clear audio path (can't assume it exists in target)
   const copy = JSON.parse(JSON.stringify(seq));
-  copy.id        = require('uuid').v4();
+  copy.id        = uuid();
   copy.audioPath = null;
   copy.audioDuration = null;
   // Append "(copy)" if a sequence with the same name already exists
@@ -541,7 +583,7 @@ app.get('/api/storage', (req, res) => {
 });
 
 // DELETE /api/shows/:showName/uploads/:filename — remove a single uploaded file
-app.delete('/api/shows/:showName/uploads/:filename', (req, res) => {
+app.delete('/api/shows/:showName/uploads/:filename', requireShowCode, (req, res) => {
   const { showName, filename } = req.params;
   // Prevent path traversal
   const safe = path.basename(filename);
