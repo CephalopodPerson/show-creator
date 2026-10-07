@@ -192,23 +192,29 @@ export default function ShowEditor({ showName, newCode, onExit }) {
 
   const openSong = songs.find(s => s.id === openId);
 
+  const codeBars = (
+    <>
+      {codeNote && (
+        <div className="code-notice">
+          <span>Code for “{showName}”: <strong>{codeNote}</strong></span>
+          <span>Write it down — anyone with this code can edit or archive the show.</span>
+          <button className="btn-ghost" onClick={() => setCodeNote(null)}>Got it</button>
+        </div>
+      )}
+      {!unlocked && (
+        <div className="locked-banner">
+          <span>🔒 View only — enter this show's code to make changes.</span>
+          <button className="btn-secondary" onClick={unlock}>Unlock</button>
+        </div>
+      )}
+    </>
+  );
+
   // ── Editing one song: full screen ──
   if (openSong) {
     return (
       <>
-        {codeNote && (
-          <div className="code-notice">
-            <span>Code for “{showName}”: <strong>{codeNote}</strong></span>
-            <span>Write it down — anyone with this code can edit or archive the show.</span>
-            <button className="btn-ghost" onClick={() => setCodeNote(null)}>Got it</button>
-          </div>
-        )}
-        {!unlocked && (
-          <div className="locked-banner">
-            <span>🔒 View only — enter this show's code to make changes.</span>
-            <button className="btn-secondary" onClick={unlock}>Unlock</button>
-          </div>
-        )}
+        {codeBars}
         <SequenceEditor
           key={openSong.id}
           sequence={openSong}
@@ -227,19 +233,7 @@ export default function ShowEditor({ showName, newCode, onExit }) {
   // ── Song picker ──
   return (
     <>
-      {codeNote && (
-        <div className="code-notice">
-          <span>Code for “{showName}”: <strong>{codeNote}</strong></span>
-          <span>Write it down — anyone with this code can edit or archive the show.</span>
-          <button className="btn-ghost" onClick={() => setCodeNote(null)}>Got it</button>
-        </div>
-      )}
-      {!unlocked && (
-        <div className="locked-banner">
-          <span>🔒 View only — enter this show's code to make changes.</span>
-          <button className="btn-secondary" onClick={unlock}>Unlock</button>
-        </div>
-      )}
+      {codeBars}
     <div className="song-picker">
       <div className="song-picker-head">
         <div>
