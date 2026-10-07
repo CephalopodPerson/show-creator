@@ -28,9 +28,9 @@ export function onCodeRequest(fn) {
   return () => { if (listener === fn) listener = null; };
 }
 
-function requestCode(show, reason) {
+function requestCode(show, reason, retryAfter) {
   if (pending.has(show)) return pending.get(show);
-  const p = (listener ? listener({ show, reason }) : Promise.resolve(null))
+  const p = (listener ? listener({ show, reason, retryAfter }) : Promise.resolve(null))
     .finally(() => pending.delete(show));
   pending.set(show, p);
   return p;
@@ -40,7 +40,12 @@ export class CodeCancelled extends Error {
   constructor(show) { super(`Edit code not entered for ${show}`); this.name = 'CodeCancelled'; this.show = show; }
 }
 
-const AUTH_ERRORS = new Set(['code_required', 'code_wrong']);
+const AUTH_ERRORS = new Set(['code_required', 'code_wrong', 'locked']);
+const AUTH_STATUSES = new Set([401, 403, 429]);
+
+// Codes travel in an HTTP header, which only carries printable ASCII — no
+// stored code can contain anything else, so such input can never match.
+const SENDABLE = /^[\x20-\x7e]+$/;
 
 /**
  * A write to a show. Attaches the stored code (and admin token, if any). If
@@ -59,7 +64,7 @@ export async function writeShow(show, path, opts = {}, { header = 'X-Show-Code',
     if (token) headers.set('x-admin-token', token);
 
     const res = await api(path, { ...opts, headers });
-    if (res.status !== 401 && res.status !== 403) {
+    if (!AUTH_STATUSES.has(res.status)) {
       if (code) setCode(show, code);
       return res;
     }
@@ -79,7 +84,15 @@ export async function writeShow(show, path, opts = {}, { header = 'X-Show-Code',
     // with a code we know is wrong.
     const forgetOnCancel = fromStorage && body.error === 'code_wrong';
 
-    const entered = await requestCode(show, body.error);
+    // 'locked': too many wrong codes from this address; the server says how
+    // long to wait. Treated like any other auth error — ask again.
+    let reason = body.error;
+    let entered;
+    for (;;) {
+      entered = await requestCode(show, reason, body.retryAfter);
+      if (!entered || SENDABLE.test(entered)) break;
+      reason = 'code_wrong';   // unsendable — it can't be right, so don't send it
+    }
     if (!entered) {
       if (forgetOnCancel) forgetCode(show);
       throw new CodeCancelled(show);

@@ -102,6 +102,10 @@ export default function AdminPanel({ onBack }) {
   const [codes,    setCodes]    = useState([]);
   const [codeEdit, setCodeEdit] = useState({});
 
+  function loadCodes() {
+    api('/api/admin/codes', { headers: adminHeaders() }).then(r => r.ok ? r.json() : []).then(setCodes).catch(() => {});
+  }
+
   useEffect(() => {
     if (!token || mustChange) return;
     api('/api/settings').then(r => r.json()).then(setSettings);
@@ -111,7 +115,7 @@ export default function AdminPanel({ onBack }) {
       return r.json();
     }).then(setArchive).catch(() => {});
     api('/api/admin/template', { headers: adminHeaders() }).then(r => r.json()).then(setTemplate).catch(() => {});
-    api('/api/admin/codes', { headers: adminHeaders() }).then(r => r.ok ? r.json() : []).then(setCodes).catch(() => {});
+    loadCodes();
   }, [token, mustChange]);
 
   async function uploadTemplate(e) {
@@ -165,8 +169,8 @@ export default function AdminPanel({ onBack }) {
     const res = await api(`/api/archive/${encodeURIComponent(name)}/restore`, {
       method: 'POST', headers: adminHeaders(),
     });
-    if (res.ok) setArchive(prev => prev.filter(s => s.name !== name));
-    else { const e = await res.json(); alert(e.error); }
+    if (res.ok) { setArchive(prev => prev.filter(s => s.name !== name)); loadCodes(); }
+    else { const e = await res.json().catch(() => ({})); alert(e.message ?? e.error ?? 'Restore failed'); }
   }
 
   async function deleteShow(name) {
@@ -182,8 +186,8 @@ export default function AdminPanel({ onBack }) {
       headers: adminHeaders(),
       body: JSON.stringify({ name: newName }),
     });
-    if (res.ok) { setMsg(`✓ Copied as "${newName}"`); setTimeout(() => setMsg(''), 2500); }
-    else { const e = await res.json(); alert(e.error); }
+    if (res.ok) { setMsg(`✓ Copied as "${newName}"`); setTimeout(() => setMsg(''), 2500); loadCodes(); }
+    else { const e = await res.json().catch(() => ({})); alert(e.message ?? e.error ?? 'Copy failed'); }
   }
 
   if (!token) return <LoginForm onLogin={(t, must) => { setToken(t); setMustChange(!!must); }} />;

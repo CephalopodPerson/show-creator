@@ -20,6 +20,7 @@ export default function StorageManager({ onClose }) {
   const [loading,   setLoading]   = useState(true);
   const [confirmDel, setConfirmDel] = useState(null); // { showName, fileName }
   const [deleting,  setDeleting]  = useState(false);
+  const [message,   setMessage]   = useState('');
 
   async function load() {
     setLoading(true);
@@ -36,13 +37,15 @@ export default function StorageManager({ onClose }) {
 
   async function deleteFile(showName, fileName) {
     setDeleting(true);
+    setMessage('');
     try {
       await writeShow(showName, `/api/shows/${encodeURIComponent(showName)}/uploads/${encodeURIComponent(fileName)}`, {
         method: 'DELETE',
       });
       await load();
-    } catch {
-      // silently reload anyway
+    } catch (e) {
+      if (e instanceof CodeCancelled) setMessage('Not changed — that show is locked.');
+      // reload anyway
       await load();
     }
     setConfirmDel(null);
@@ -59,6 +62,7 @@ export default function StorageManager({ onClose }) {
         </div>
 
         <div className="storage-body">
+          {message && <p className="form-error">{message}</p>}
           {loading && <div className="storage-empty">Loading…</div>}
 
           {!loading && !data && (

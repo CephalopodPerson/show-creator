@@ -45,7 +45,7 @@ export default function ShowList({ onOpen, onAdmin }) {
       if (!res.ok) { setListErr(`Could not archive "${name}".`); return; }
       setShows(prev => prev.filter(s => s.name !== name));
     } catch (e) {
-      if (!(e instanceof CodeCancelled)) setListErr(`Could not archive "${name}".`);
+      setListErr(e instanceof CodeCancelled ? 'Not changed — that show is locked.' : `Could not archive "${name}".`);
     }
   }
 

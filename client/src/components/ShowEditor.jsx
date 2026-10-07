@@ -65,7 +65,10 @@ export default function ShowEditor({ showName, newCode, onExit }) {
     try {
       const res = await write(`${API(showName)}/unlock`, { method: 'POST' });
       if (res.ok) setUnlocked(true);
-    } catch { /* cancelled */ }
+      else showToast('Could not unlock — try again.');
+    } catch (e) {
+      if (!(e instanceof CodeCancelled)) showToast('Could not unlock — try again.');
+    }
   }
 
   useEffect(() => { api('/api/settings').then(r => r.json()).then(setSettings).catch(() => {}); }, []);
