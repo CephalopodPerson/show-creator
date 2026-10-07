@@ -1,18 +1,21 @@
 // Minimal local server — proxies QLC+ WebSocket API calls to avoid CORS issues.
 const express   = require('express');
 const WebSocket = require('ws');
+const { isAllowedQlcExe, requireToken } = require('./bridge-guard');
 
 const app  = express();
 const PORT = 3848;
 
 app.use(express.json());
 app.use((req, res, next) => {
-  res.setHeader('Access-Control-Allow-Origin',  '*');
-  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Origin',  '*');   // page is file://
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Bridge-Token');
   if (req.method === 'OPTIONS') return res.sendStatus(204);
   next();
 });
+if (!process.env.BRIDGE_TOKEN) console.warn('BRIDGE_TOKEN not set — bridge will refuse all requests');
+app.use(requireToken(process.env.BRIDGE_TOKEN));
 
 // POST /qlc  { host?, port?, functionId, action }
 // Sends a QLC+ WebSocket API message: QLC+API|setFunctionStatus|<id>|<0|1>
@@ -76,7 +79,9 @@ app.post('/launch-qlc', async (req, res) => {
 
   const exe = exePath || QLC_GUESSES.find(p => { try { return fsSync.existsSync(p); } catch { return false; } });
   if (!exe) return res.status(400).json({ error: 'QLC+ executable not found — set the path in Settings' });
-  if (!fsSync.existsSync(exe)) return res.status(400).json({ error: `Not found: ${exe}` });
+  if (!isAllowedQlcExe(exe)) {
+    return res.status(400).json({ error: `Not a QLC+ executable (expected qlcplus or qlcplus.exe): ${exe}` });
+  }
 
   const args = ['-w'];   // always enable the web API
 
@@ -105,27 +110,6 @@ app.post('/launch-qlc', async (req, res) => {
     res.json({ ok: true, exe, args, workspace: localQxw });
   } catch (e) {
     res.status(500).json({ error: `Launch failed: ${e.message}` });
-  }
-});
-
-// ── LEDfx proxy ──────────────────────────────────────────────────────────────
-// The VPS can't reach the venue LAN, so all LEDfx calls route through here.
-// POST /ledfx  { host, port, method, path, body? }
-app.post('/ledfx', async (req, res) => {
-  const { host = '127.0.0.1', port = 8888, method = 'GET', path: apiPath = '/api/effects', body } = req.body;
-  const url = `http://${host}:${port}${apiPath}`;
-  try {
-    const r = await fetch(url, {
-      method,
-      headers: { 'Content-Type': 'application/json' },
-      body: body ? JSON.stringify(body) : undefined,
-    });
-    const text = await r.text();
-    let parsed; try { parsed = JSON.parse(text); } catch { parsed = text; }
-    if (!r.ok) return res.status(502).json({ error: `LedFx returned ${r.status}`, detail: parsed });
-    res.json({ ok: true, data: parsed });
-  } catch (e) {
-    res.status(500).json({ error: `Could not reach LedFx at ${host}:${port} — is it running?` });
   }
 });
 

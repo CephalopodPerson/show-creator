@@ -1,7 +1,10 @@
 const { app, BrowserWindow, globalShortcut } = require('electron');
 const path = require('path');
 
-// Start the local OSC bridge server before opening the window
+// Per-launch secret shared only with our own window. The bridge refuses any
+// request without it, so other pages on this PC can't drive it.
+const BRIDGE_TOKEN = require('crypto').randomBytes(24).toString('hex');
+process.env.BRIDGE_TOKEN = BRIDGE_TOKEN;
 require('./server');
 
 let win;
@@ -20,7 +23,7 @@ app.whenReady().then(() => {
     },
   });
 
-  win.loadFile('app.html');
+  win.loadFile('app.html', { query: { t: BRIDGE_TOKEN } });
   win.setMenuBarVisibility(false);
 
   // F12 toggles DevTools

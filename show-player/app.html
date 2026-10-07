@@ -132,6 +132,14 @@ body { background: #0f0f13; color: #e0e0e0; font-family: 'Segoe UI', system-ui, 
 <script>
 // ── State ─────────────────────────────────────────────────────────────────────
 const BRIDGE_PORT = 3848;
+const BRIDGE_TOKEN = new URLSearchParams(location.search).get('t') || '';
+
+function bridge(path, opts = {}) {
+  return fetch(`http://127.0.0.1:${BRIDGE_PORT}${path}`, {
+    ...opts,
+    headers: { 'Content-Type': 'application/json', 'X-Bridge-Token': BRIDGE_TOKEN, ...(opts.headers || {}) },
+  });
+}
 let vpsUrl        = localStorage.getItem('vpsUrl')  || '';
 let qlcHost       = localStorage.getItem('qlcHost') || '127.0.0.1';
 let qlcExe        = localStorage.getItem('qlcExe')  || '';
@@ -169,7 +177,7 @@ function saveAndConnect() {
 
 async function autoFindQlc() {
   try {
-    const r = await fetch(`http://127.0.0.1:${BRIDGE_PORT}/find-qlc`).then(r => r.json());
+    const r = await bridge('/find-qlc').then(r => r.json());
     if (r.found) {
       document.getElementById('qlcExe').value = r.found;
       setStatus('✓ Found QLC+ at ' + r.found, 'ok');
@@ -186,10 +194,9 @@ async function launchQlc(showName) {
   setStatus('Launching QLC+…', '');
   const qxwUrl = `${vpsUrl}/api/shows/${encodeURIComponent(showName)}/qxw-file`;
   try {
-    const res = await fetch(`http://127.0.0.1:${BRIDGE_PORT}/launch-qlc`, {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ exePath: qlcExe || undefined, qxwUrl, showName }),
+    const res = await bridge('/launch-qlc', {
+      method: 'POST',
+      body:   JSON.stringify({ exePath: qlcExe || undefined, qxwUrl, showName }),
     });
     const data = await res.json();
     if (!res.ok) { setStatus('⚠ ' + (data.error ?? 'Launch failed'), 'err'); return; }
@@ -229,20 +236,31 @@ function renderShows(shows) {
   }
   area.innerHTML = '';
   for (const s of shows) {
-    const card = document.createElement('div');
-    card.className = 'show-card';
+    const card = el('div', 'show-card');
     card.id = 'card-' + s.name;
-    card.innerHTML = `
-      <div class="show-card-top">
-        <button class="show-card-header" onclick="toggleShow('${esc(s.name)}')">
-          <span class="show-card-name">${esc(s.name)}</span>
-          <span class="show-card-meta">${s.sequences} sequence${s.sequences !== 1 ? 's' : ''}</span>
-          <span class="show-card-chevron" id="chev-${esc(s.name)}">▼</span>
-        </button>
-        <button class="btn-launch" onclick="launchQlc('${esc(s.name)}')" title="Launch QLC+ with this show's workspace loaded and web API enabled">🚀 Launch QLC+</button>
-      </div>
-      <div class="seq-list" id="seqs-${esc(s.name)}" style="display:none"></div>
-    `;
+
+    const header = el('button', 'show-card-header');
+    header.append(
+      el('span', 'show-card-name', s.name),
+      el('span', 'show-card-meta', `${s.sequences} sequence${s.sequences !== 1 ? 's' : ''}`),
+    );
+    const chev = el('span', 'show-card-chevron', '▼');
+    chev.id = 'chev-' + s.name;
+    header.append(chev);
+    header.addEventListener('click', () => toggleShow(s.name));
+
+    const launch = el('button', 'btn-launch', '🚀 Launch QLC+');
+    launch.title = "Launch QLC+ with this show's workspace loaded and web API enabled";
+    launch.addEventListener('click', () => launchQlc(s.name));
+
+    const top = el('div', 'show-card-top');
+    top.append(header, launch);
+
+    const list = el('div', 'seq-list');
+    list.id = 'seqs-' + s.name;
+    list.style.display = 'none';
+
+    card.append(top, list);
     area.appendChild(card);
   }
 }
@@ -277,26 +295,32 @@ function renderSequences(name) {
   }
   seqList.innerHTML = '';
   for (const seq of show.sequences) {
-    const hasOsc   = !!seq.qlcFunctionId;
-    const hasAudio = !!seq.audioPath;
+    const hasOsc    = !!seq.qlcFunctionId;
+    const hasAudio  = !!seq.audioPath;
     const isPlaying = playing?.seqId === seq.id;
-    const row = document.createElement('div');
-    row.className = 'seq-row' + (isPlaying ? ' playing' : '');
+
+    const row = el('div', 'seq-row' + (isPlaying ? ' playing' : ''));
     row.id = 'row-' + seq.id;
-    row.innerHTML = `
-      <div class="seq-info">
-        <div class="seq-name">${esc(seq.name)}</div>
-        <div class="seq-flags">
-          ${hasOsc   ? '<span class="flag flag-ok">QLC+</span>' : '<span class="flag flag-warn">no QLC+ ID — export .qxw first</span>'}
-          ${hasAudio ? '<span class="flag flag-ok">Audio</span>' : '<span class="flag flag-warn">no audio</span>'}
-        </div>
-      </div>
-      ${isPlaying
-        ? `<button class="btn-seq-stop" onclick="stopPlayback(true)">■ Stop</button>`
-        : `<button class="btn-play" onclick="playSequence('${esc(name)}','${seq.id}')"
-             ${!hasAudio ? 'disabled title="No audio uploaded for this sequence"' : ''}>▶ Play</button>`
-      }
-    `;
+
+    const flags = el('div', 'seq-flags');
+    flags.append(
+      hasOsc   ? el('span', 'flag flag-ok', 'QLC+')  : el('span', 'flag flag-warn', 'no QLC+ ID — export .qxw first'),
+      hasAudio ? el('span', 'flag flag-ok', 'Audio') : el('span', 'flag flag-warn', 'no audio'),
+    );
+    const info = el('div', 'seq-info');
+    info.append(el('div', 'seq-name', seq.name), flags);
+
+    let btn;
+    if (isPlaying) {
+      btn = el('button', 'btn-seq-stop', '■ Stop');
+      btn.addEventListener('click', () => stopPlayback(true));
+    } else {
+      btn = el('button', 'btn-play', '▶ Play');
+      if (!hasAudio) { btn.disabled = true; btn.title = 'No audio uploaded for this sequence'; }
+      btn.addEventListener('click', () => playSequence(name, seq.id));
+    }
+
+    row.append(info, btn);
     seqList.appendChild(row);
   }
 }
@@ -312,10 +336,9 @@ async function playSequence(showName, seqId) {
   // Trigger QLC+ via local bridge — skip if no function ID exported yet
   if (seq.qlcFunctionId) {
     try {
-      const r = await fetch(`http://127.0.0.1:${BRIDGE_PORT}/qlc`, {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ host: qlcHost, port: 9999, functionId: seq.qlcFunctionId, action: 1 }),
+      const r = await bridge('/qlc', {
+        method: 'POST',
+        body:   JSON.stringify({ host: qlcHost, port: 9999, functionId: seq.qlcFunctionId, action: 1 }),
       });
       if (!r.ok) {
         const err = await r.json().catch(() => ({}));
@@ -361,10 +384,9 @@ function stopPlayback(sendOsc) {
   audio.src = '';
 
   if (sendOsc && playing?.funcId) {
-    fetch(`http://127.0.0.1:${BRIDGE_PORT}/qlc`, {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ host: qlcHost, port: 9999, functionId: playing.funcId, action: 0 }),
+    bridge('/qlc', {
+      method: 'POST',
+      body:   JSON.stringify({ host: qlcHost, port: 9999, functionId: playing.funcId, action: 0 }),
     }).catch(() => {});
   }
 
@@ -396,6 +418,14 @@ function fmt(s) {
 
 function esc(str) {
   return String(str).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+// Build an element with text set via textContent — never parsed as HTML.
+function el(tag, className, text) {
+  const n = document.createElement(tag);
+  if (className) n.className = className;
+  if (text !== undefined) n.textContent = text;
+  return n;
 }
 
 function setStatus(msg, type = '') {
