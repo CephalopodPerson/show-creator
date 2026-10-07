@@ -17,6 +17,13 @@ cd "$STABLE_DIR"
 
 echo "==> Merging beta into main"
 git fetch origin
+
+# Same as update.sh: this folder is a deployment target, so npm install and the
+# client build leave package-lock.json and client/dist modified, and the merge
+# below refuses to run over them. Discard that churn. shows/, data/ and
+# archive/ are gitignored, so they are never touched.
+git reset --hard
+git clean -fd client/dist 2>/dev/null || true
 git checkout main
 git pull origin main
 git merge origin/beta -m "chore: promote beta to stable"
