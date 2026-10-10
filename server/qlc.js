@@ -144,6 +144,51 @@ function flattenStep(step) {
     if (fadeFx.direction === 'out' || fadeFx.direction === 'both') fadeOut = fadeFx.duration_s ?? 1;
   }
 
+  // Black that keeps the spot shutter open, so fading to or from it moves only
+  // the dimmers instead of sweeping the shutter through its strobe range
+  const dark = c => c ? { ...c, brightness: 0, shutterOpen: true } : c;
+
+  // Block fades, matching the stage preview:
+  //  - a fade-in starts from black. Without that QLC+ just crossfades from the
+  //    previous block, which is invisible when the colours are the same.
+  //  - a fade-out is its own final step that fades down to black. QLC+ only
+  //    fades *into* a step, so a step's FadeOut does nothing in a sequence.
+  const FRAME_S = 0.02;   // one QLC+ engine tick
+  const withBlockFades = out => {
+    let res = out.map(s => ({ ...s, fade_out: 0 }));
+    const totalMs = Math.round(dur * 1000);
+    // A fade-out longer than the block uses the whole block (e.g. a song's last
+    // beat). It then fades down from whatever is on stage, so no fade-in.
+    const fadeOutMs = Math.min(Math.round(fadeOut * 1000), totalMs);
+    const fadeOutAll = fadeOutMs > 0 && fadeOutMs >= totalMs;
+
+    if (fadeOutMs > 0) {
+      const fadeMs = fadeOutMs;
+      // Trim the fade's length off the end of the block, then fade to black
+      let cut = fadeMs;
+      while (cut > 0 && res.length) {
+        const last = res[res.length - 1];
+        const ms   = Math.round(last.duration * 1000);
+        if (ms <= cut) { res.pop(); cut -= ms; continue; }
+        const keep = (ms - cut) / 1000;
+        res[res.length - 1] = { ...last, duration: keep, fade_in: Math.min(last.fade_in, keep) };
+        cut = 0;
+      }
+      res.push({ par: dark(basePar), spot: dark(baseSpot), fade_in: fadeMs / 1000, duration: fadeMs / 1000, fade_out: 0, note: '' });
+    }
+
+    if (fadeIn > 0 && !fadeOutAll && res.length && res[0].duration > FRAME_S) {
+      const first = res[0];
+      const rest  = first.duration - FRAME_S;
+      res = [
+        { par: dark(basePar), spot: dark(baseSpot), fade_in: 0, duration: FRAME_S, fade_out: 0, note: first.note },
+        { ...first, duration: rest, fade_in: Math.min(first.fade_in, rest), note: '' },
+        ...res.slice(1),
+      ];
+    }
+    return res;
+  };
+
   // ── Pulse: alternate bright/dim across the step ──
   if (pulseParFx || pulseSpotFx) {
     // Cap the expansion so a pulse on a long section can't generate hundreds of
@@ -167,11 +212,16 @@ function flattenStep(step) {
     const gPar  = grid(pulseParFx);
     const gSpot = grid(pulseSpotFx);
     // Level a track has reached at the end of a slice: even half-cycles are
-    // bright, odd ones dim
+    // bright, odd ones dim. LEDs still look almost fully lit at half DMX, so
+    // the dim level is cubed to pull the dip near black (depth 0.5 → 12.5%)
+    // and the pulse reads on stage the way it does in the preview.
     const factorAt = (g, edgeMs) => {
       const k = g.edges.findIndex(e => e >= edgeMs);
-      return k % 2 === 0 ? 1 : (1 - g.depth);
+      return k % 2 === 0 ? 1 : Math.pow(1 - g.depth, 3);
     };
+    // Never dim all the way to 0: that would close the spot shutter on every
+    // dip and sweep it through its strobe range
+    const pulsed = (c, f) => c ? { ...c, brightness: Math.max((c.brightness ?? 100) > 0 ? 1 : 0, Math.round((c.brightness ?? 100) * f)) } : c;
 
     // When both tracks pulse, the slices are the union of both grids. QLC+
     // plays a step's fade-in inside the step, so boundaries that fall within
@@ -188,15 +238,16 @@ function flattenStep(step) {
       const sliceS = (edgeMs - prevMs) / 1000;
       prevMs = edgeMs;
       out.push({
-        par:      withStrobe(gPar ? scale(basePar, factorAt(gPar, edgeMs)) : basePar),
-        spot:     gSpot ? scale(baseSpot, factorAt(gSpot, edgeMs)) : baseSpot,
-        fade_in:  i === 0 ? fadeIn : sliceS * 0.4,
+        par:      withStrobe(gPar ? pulsed(basePar, factorAt(gPar, edgeMs)) : basePar),
+        spot:     gSpot ? pulsed(baseSpot, factorAt(gSpot, edgeMs)) : baseSpot,
+        // Fade across most of each half-cycle so it breathes like the preview
+        fade_in:  i === 0 ? fadeIn : sliceS * 0.75,
         duration: sliceS,
-        fade_out: i === edges.length - 1 ? fadeOut : 0,
+        fade_out: 0,
         note:     i === 0 ? (step.memo ?? '') : '',
       });
     });
-    return out;
+    return withBlockFades(out);
   }
 
   // ── Flash: base colour interrupted by short bursts ──
@@ -242,21 +293,18 @@ function flattenStep(step) {
         fade_in: 0, duration: tail, fade_out: fadeOut, note: '',
       });
     }
-    if (out.length > 0) {
-      out[out.length - 1].fade_out = fadeOut;
-      return out;
-    }
+    if (out.length > 0) return withBlockFades(out);
   }
 
   // ── No time-varying effects: a single step ──
-  return [{
+  return withBlockFades([{
     par:      withStrobe(basePar),
     spot:     baseSpot,
     fade_in:  fadeIn,
     duration: dur,
-    fade_out: fadeOut,
+    fade_out: 0,
     note:     step.memo ?? '',
-  }];
+  }]);
 }
 
 function parDmx(params) {
@@ -280,7 +328,8 @@ function spotDmx(params) {
   // params: { r,g,b,w, brightness }
   // Pan/Tilt (ch 0,1,12,13) are NEVER written — operator controls position live.
   const dim = Math.round((params.brightness ?? 100) / 100 * 50); // max ~50 for spot dimmer
-  const shutter = (params.brightness ?? 100) > 0 ? 205 : 0;     // open or closed
+  // Open or closed. Fades to black keep it open (shutterOpen) and only move the dimmer.
+  const shutter = (params.shutterOpen || (params.brightness ?? 100) > 0) ? 205 : 0;
   return [
     [3, shutter],
     [4, params.r  ?? 0],
