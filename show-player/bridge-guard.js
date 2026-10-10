@@ -1,11 +1,17 @@
 const fs   = require('fs');
 const path = require('path');
 
+const qlcExeBase = p => path.basename(String(p).replace(/\\/g, '/')).toLowerCase();
+
+/** QLC+ 4 ships as qlcplus(.exe), QLC+ 5 as qlcplus5(.exe). */
+function isQlc5(p) {
+  return /^qlcplus5(\.exe)?$/.test(qlcExeBase(p));
+}
+
 /** The bridge only ever launches QLC+ itself. */
 function isAllowedQlcExe(p) {
   if (typeof p !== 'string' || !p) return false;
-  const base = path.basename(p.replace(/\\/g, '/')).toLowerCase();
-  if (base !== 'qlcplus' && base !== 'qlcplus.exe') return false;
+  if (!/^qlcplus5?(\.exe)?$/.test(qlcExeBase(p))) return false;
   try { return fs.statSync(p).isFile(); } catch { return false; }
 }
 
@@ -23,4 +29,4 @@ function requireToken(token) {
   };
 }
 
-module.exports = { isAllowedQlcExe, requireToken };
+module.exports = { isAllowedQlcExe, isQlc5, requireToken };

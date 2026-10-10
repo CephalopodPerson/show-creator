@@ -103,8 +103,12 @@ body { background: #0f0f13; color: #e0e0e0; font-family: 'Segoe UI', system-ui, 
   </div>
   <div class="config-row">
     <span class="config-label">QLC+ exe path</span>
-    <input class="config-input" id="qlcExe" placeholder="C:\QLC+\qlcplus.exe" />
+    <input class="config-input" id="qlcExe" placeholder="C:\QLC+\qlcplus.exe  or  C:\QLC+5\qlcplus5.exe" onchange="useQlcExe(this.value)" />
     <button class="btn-connect" onclick="autoFindQlc()">Auto-find</button>
+  </div>
+  <div class="config-row" id="qlcPickRow" style="display:none">
+    <span class="config-label">Use version</span>
+    <select class="config-input" id="qlcPick" onchange="useQlcExe(this.value)"></select>
   </div>
   <div class="config-hint">VPS URL is where Show Creator is hosted. QLC+ host is where QLC+ runs (usually 127.0.0.1). Use <strong>Launch QLC+</strong> on a show to start it with the web API enabled and the workspace already loaded — no command line needed.</div>
 </div>
@@ -140,9 +144,13 @@ function bridge(path, opts = {}) {
     headers: { 'Content-Type': 'application/json', 'X-Bridge-Token': BRIDGE_TOKEN, ...(opts.headers || {}) },
   });
 }
-let vpsUrl        = localStorage.getItem('vpsUrl')  || '';
+// Real defaults (not just placeholders) so staff can connect without typing
+const DEFAULT_VPS_URL = 'https://showcreator.upliftseoul.com';
+const DEFAULT_QLC_EXE = 'C:\\QLC+\\qlcplus.exe';
+
+let vpsUrl        = localStorage.getItem('vpsUrl')  || DEFAULT_VPS_URL;
 let qlcHost       = localStorage.getItem('qlcHost') || '127.0.0.1';
-let qlcExe        = localStorage.getItem('qlcExe')  || '';
+let qlcExe        = localStorage.getItem('qlcExe')  || DEFAULT_QLC_EXE;
 let playing     = null;  // { seqId, funcId, duration }
 let timerHandle = null;
 let showData    = {};    // name → full show json
@@ -158,6 +166,10 @@ if (vpsUrl) {
 } else {
   document.getElementById('configPanel').classList.add('open');
 }
+
+// First run: no saved QLC+ path yet, so look for whichever version is
+// installed and use that instead of the default guess
+if (!localStorage.getItem('qlcExe')) autoFindQlc();
 
 // ── Config ────────────────────────────────────────────────────────────────────
 function toggleConfig() {
@@ -175,23 +187,54 @@ function saveAndConnect() {
   loadShows();
 }
 
+// QLC+ 4 ships as qlcplus.exe, QLC+ 5 as qlcplus5.exe
+function qlcVersionOf(exe) {
+  return /qlcplus5(\.exe)?$/i.test(exe || '') ? 5 : 4;
+}
+
+// Takes effect immediately — no need to press Connect after picking
+function useQlcExe(exe) {
+  qlcExe = (exe || '').trim();
+  document.getElementById('qlcExe').value = qlcExe;
+  localStorage.setItem('qlcExe', qlcExe);
+  if (qlcExe) setStatus(`✓ Using QLC+ ${qlcVersionOf(qlcExe)} at ${qlcExe}`, 'ok');
+}
+
 async function autoFindQlc() {
+  let r;
   try {
-    const r = await bridge('/find-qlc').then(r => r.json());
-    if (r.found) {
-      document.getElementById('qlcExe').value = r.found;
-      setStatus('✓ Found QLC+ at ' + r.found, 'ok');
-    } else {
-      setStatus('⚠ QLC+ not found in the usual places — enter the path manually', 'warn');
-    }
+    r = await bridge('/find-qlc').then(r => r.json());
   } catch {
-    setStatus('⚠ Bridge not responding', 'err');
+    setStatus('⚠ Bridge not responding — close any other Show Player window and reopen this one', 'err');
+    return;
+  }
+  const installs = r.installs ?? (r.found ? [{ path: r.found, version: qlcVersionOf(r.found) }] : []);
+  const row  = document.getElementById('qlcPickRow');
+  const pick = document.getElementById('qlcPick');
+  if (!installs.length) {
+    row.style.display = 'none';
+    setStatus('⚠ QLC+ not found in the usual places — enter the path manually', 'warn');
+    return;
+  }
+  // Keep the current choice if it's still installed, otherwise take the first
+  const current = installs.find(i => i.path.toLowerCase() === qlcExe.toLowerCase()) ?? installs[0];
+  pick.replaceChildren(...installs.map(i => {
+    const opt = document.createElement('option');
+    opt.value = i.path;
+    opt.textContent = `QLC+ ${i.version} — ${i.path}`;
+    opt.selected = i === current;
+    return opt;
+  }));
+  row.style.display = installs.length > 1 ? '' : 'none';
+  useQlcExe(current.path);
+  if (installs.length > 1) {
+    setStatus(`✓ Found ${installs.map(i => 'QLC+ ' + i.version).join(' and ')} — using QLC+ ${current.version}. Switch with "Use version".`, 'ok');
   }
 }
 
 // ── Launch QLC+ with this show's workspace ───────────────────────────────────
 async function launchQlc(showName) {
-  setStatus('Launching QLC+…', '');
+  setStatus(qlcExe ? `Launching QLC+ ${qlcVersionOf(qlcExe)}…` : 'Launching QLC+…', '');
   const qxwUrl = `${vpsUrl}/api/shows/${encodeURIComponent(showName)}/qxw-file`;
   try {
     const res = await bridge('/launch-qlc', {
@@ -200,7 +243,7 @@ async function launchQlc(showName) {
     });
     const data = await res.json();
     if (!res.ok) { setStatus('⚠ ' + (data.error ?? 'Launch failed'), 'err'); return; }
-    setStatus('🚀 QLC+ launched with workspace loaded — give it a few seconds', 'ok');
+    setStatus(`🚀 QLC+${data.version ? ' ' + data.version : ''} launched with workspace loaded — give it a few seconds`, 'ok');
   } catch (e) {
     setStatus('⚠ Bridge not responding: ' + e.message, 'err');
   }

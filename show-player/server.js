@@ -1,7 +1,7 @@
 // Minimal local server — proxies QLC+ WebSocket API calls to avoid CORS issues.
 const express   = require('express');
 const WebSocket = require('ws');
-const { isAllowedQlcExe, requireToken } = require('./bridge-guard');
+const { isAllowedQlcExe, isQlc5, requireToken } = require('./bridge-guard');
 
 const app  = express();
 const PORT = 3848;
@@ -65,13 +65,20 @@ const QLC_GUESSES = [
   'C:\\QLC+\\qlcplus.exe',
   'C:\\Program Files\\QLC+\\qlcplus.exe',
   'C:\\Program Files (x86)\\QLC+\\qlcplus.exe',
+  'C:\\QLC+5\\qlcplus5.exe',
+  'C:\\Program Files\\QLC+5\\qlcplus5.exe',
   '/usr/bin/qlcplus',
   '/Applications/QLC+.app/Contents/MacOS/qlcplus',
 ];
 
+const qlcVersion = exe => (isQlc5(exe) ? 5 : 4);
+
+// Venues run QLC+ 4 and 5 side by side, so report every install found
 app.get('/find-qlc', (req, res) => {
-  const found = QLC_GUESSES.find(p => { try { return fsSync.existsSync(p); } catch { return false; } });
-  res.json({ found: found ?? null, candidates: QLC_GUESSES });
+  const installs = QLC_GUESSES
+    .filter(p => { try { return fsSync.existsSync(p); } catch { return false; } })
+    .map(p => ({ path: p, version: qlcVersion(p) }));
+  res.json({ found: installs[0]?.path ?? null, installs, candidates: QLC_GUESSES });
 });
 
 app.post('/launch-qlc', async (req, res) => {
@@ -80,7 +87,7 @@ app.post('/launch-qlc', async (req, res) => {
   const exe = exePath || QLC_GUESSES.find(p => { try { return fsSync.existsSync(p); } catch { return false; } });
   if (!exe) return res.status(400).json({ error: 'QLC+ executable not found — set the path in Settings' });
   if (!isAllowedQlcExe(exe)) {
-    return res.status(400).json({ error: `Not a QLC+ executable (expected qlcplus or qlcplus.exe): ${exe}` });
+    return res.status(400).json({ error: `Not a QLC+ executable (expected qlcplus.exe or qlcplus5.exe): ${exe}` });
   }
 
   const args = ['-w'];   // always enable the web API
@@ -102,17 +109,19 @@ app.post('/launch-qlc', async (req, res) => {
     }
   }
 
-  if (operate) args.push('-p');   // start in Operate mode
+  // Start in Operate mode. QLC+ 5 has no such flag and exits on unknown ones.
+  if (operate && !isQlc5(exe)) args.push('-p');
 
   try {
     const child = spawn(exe, args, { detached: true, stdio: 'ignore' });
     child.unref();
-    res.json({ ok: true, exe, args, workspace: localQxw });
+    res.json({ ok: true, exe, version: qlcVersion(exe), args, workspace: localQxw });
   } catch (e) {
     res.status(500).json({ error: `Launch failed: ${e.message}` });
   }
 });
 
-app.listen(PORT, '127.0.0.1', () =>
+// Exported so main.js can report a port clash instead of crashing
+module.exports = app.listen(PORT, '127.0.0.1', () =>
   console.log(`Show Player bridge running on port ${PORT}`)
 );
