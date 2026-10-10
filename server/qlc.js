@@ -125,11 +125,14 @@ function flattenStep(step) {
 
   const fadeFx   = effects.find(e => e.type === 'fade');
   const strobeFx = effects.find(e => e.type === 'strobe' && onPar(e));  // strobe is a par channel
-  const pulseFx  = effects.find(e => e.type === 'pulse');
   const flashFx  = effects.filter(e => e.type === 'flash');
 
-  const pulsePar  = pulseFx ? onPar(pulseFx)  : false;
-  const pulseSpot = pulseFx ? onSpot(pulseFx) : false;
+  // Par and spot each carry their own pulse layer (possibly at different rates),
+  // so look one up per track. Taking only the first pulse dropped the other
+  // fixture's pulse whenever a block had both.
+  const pulses      = effects.filter(e => e.type === 'pulse');
+  const pulseParFx  = pulses.find(onPar);
+  const pulseSpotFx = pulses.find(onSpot);
 
   // Strobe is a channel value on the par fixture, applied to every sub-step
   const withStrobe = p => (p && strobeFx) ? { ...p, strobe: strobeFx.value ?? 200 } : p;
@@ -142,36 +145,57 @@ function flattenStep(step) {
   }
 
   // ── Pulse: alternate bright/dim across the step ──
-  if (pulseFx) {
-    const rate  = Math.max(0.25, pulseFx.rate_hz ?? 2);
-    const depth = Math.min(1, Math.max(0, pulseFx.depth ?? 0.5));
+  if (pulseParFx || pulseSpotFx) {
     // Cap the expansion so a pulse on a long section can't generate hundreds of
     // steps — QLC+ slows badly with very large sequences.
     const MAX_SUBSTEPS = 120;
-    let count = Math.max(2, Math.round(dur / (1 / (rate * 2))));
-    if (count > MAX_SUBSTEPS) count = MAX_SUBSTEPS;
+    const totalMs = Math.round(dur * 1000);
 
+    // Each pulsing track alternates bright/dim on its own grid of half-cycles.
     // Durations are derived from cumulative millisecond boundaries rather than
     // a fixed per-step value. Rounding each step independently would drift by
     // up to half a millisecond per step, which across ~50 substeps pushes the
     // sequence noticeably out of sync with the audio.
-    const totalMs = Math.round(dur * 1000);
+    const grid = fx => {
+      if (!fx) return null;
+      const rate  = Math.max(0.25, fx.rate_hz ?? 2);
+      const depth = Math.min(1, Math.max(0, fx.depth ?? 0.5));
+      const count = Math.min(MAX_SUBSTEPS, Math.max(2, Math.round(dur * rate * 2)));
+      const edges = Array.from({ length: count }, (_, i) => Math.round((totalMs * (i + 1)) / count));
+      return { edges, depth };
+    };
+    const gPar  = grid(pulseParFx);
+    const gSpot = grid(pulseSpotFx);
+    // Level a track has reached at the end of a slice: even half-cycles are
+    // bright, odd ones dim
+    const factorAt = (g, edgeMs) => {
+      const k = g.edges.findIndex(e => e >= edgeMs);
+      return k % 2 === 0 ? 1 : (1 - g.depth);
+    };
+
+    // When both tracks pulse, the slices are the union of both grids. QLC+
+    // plays a step's fade-in inside the step, so boundaries that fall within
+    // the block's fade-in are merged into the first slice — the light fades
+    // up first, then starts pulsing.
+    const fadeInMs = Math.min(Math.round(fadeIn * 1000), totalMs);
+    const edges = [...new Set([totalMs, ...(gPar?.edges ?? []), ...(gSpot?.edges ?? [])])]
+      .filter(ms => ms >= fadeInMs)
+      .sort((a, b) => a - b);
+
     const out = [];
     let prevMs = 0;
-    for (let i = 0; i < count; i++) {
-      const edgeMs = Math.round((totalMs * (i + 1)) / count);
+    edges.forEach((edgeMs, i) => {
       const sliceS = (edgeMs - prevMs) / 1000;
       prevMs = edgeMs;
-      const f = i % 2 === 0 ? 1 : (1 - depth);
       out.push({
-        par:      withStrobe(pulsePar  ? scale(basePar,  f) : basePar),
-        spot:     pulseSpot ? scale(baseSpot, f) : baseSpot,
+        par:      withStrobe(gPar ? scale(basePar, factorAt(gPar, edgeMs)) : basePar),
+        spot:     gSpot ? scale(baseSpot, factorAt(gSpot, edgeMs)) : baseSpot,
         fade_in:  i === 0 ? fadeIn : sliceS * 0.4,
         duration: sliceS,
-        fade_out: i === count - 1 ? fadeOut : 0,
+        fade_out: i === edges.length - 1 ? fadeOut : 0,
         note:     i === 0 ? (step.memo ?? '') : '',
       });
-    }
+    });
     return out;
   }
 
@@ -281,15 +305,22 @@ function buildStepText(cues) {
 // ── Build a Sequence function element ────────────────────────────────────────
 // steps: sorted array of timeline cue events grouped by time
 function buildSequence(id, name, boundSceneId, steps, valuesCount) {
-  const stepEls = steps.map((s, i) => ({
-    '@_Number': i,
-    '@_FadeIn':  s2ms(s.fade_in  ?? 0),
-    '@_Hold':    s2ms(s.duration ?? 0),
-    '@_FadeOut': s2ms(s.fade_out ?? 0),
-    '@_Note':    s.note ?? '',
-    '@_Values':  valuesCount,
-    '#text':     s.dmxText,
-  }));
+  const stepEls = steps.map((s, i) => {
+    // QLC+ runs a step for FadeIn + Hold (see ChaserStep::loadXML), so Hold is
+    // whatever is left of the step after its fade-in. Writing the full duration
+    // as Hold made every faded step overrun, pushing later cues behind the audio.
+    const durMs  = s2ms(s.duration ?? 0);
+    const fadeMs = Math.min(s2ms(s.fade_in ?? 0), durMs);
+    return {
+      '@_Number': i,
+      '@_FadeIn':  fadeMs,
+      '@_Hold':    durMs - fadeMs,
+      '@_FadeOut': s2ms(s.fade_out ?? 0),
+      '@_Note':    s.note ?? '',
+      '@_Values':  valuesCount,
+      '#text':     s.dmxText,
+    };
+  });
 
   return {
     '@_ID':          id,
