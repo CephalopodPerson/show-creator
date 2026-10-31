@@ -45,5 +45,14 @@ test('requireToken rejects missing or wrong tokens', () => {
   assert.equal(run('POST', 'nope'), 403);
   assert.equal(run('POST', undefined), 403);
   assert.equal(run('OPTIONS', undefined), 'next');
+
+  // <audio src> can't send headers, so the token may come as ?t=
+  const viaQuery = t => {
+    let nexted = false;
+    mw({ method: 'GET', get: () => undefined, query: { t } }, { status() { return this; }, json() { return this; } }, () => { nexted = true; });
+    return nexted;
+  };
+  assert.equal(viaQuery('secret'), true);
+  assert.equal(viaQuery('nope'), false);
   assert.equal(requireToken('')({ method: 'GET', get: () => '' }, { status() { return this; }, json() { return 'blocked'; } }, () => 'next'), 'blocked');
 });

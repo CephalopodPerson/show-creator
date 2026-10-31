@@ -121,6 +121,38 @@ app.post('/launch-qlc', async (req, res) => {
   }
 });
 
+// ── Local audio cache ────────────────────────────────────────────────────────
+// Songs play from disk, never streamed, so a network drop can't stop a show.
+const { createAudioCache } = require('./audio-cache');
+const audioCache = createAudioCache(
+  process.env.AUDIO_CACHE_DIR || pathMod.join(os.tmpdir(), 'show-player', 'audio')
+);
+const isHttpUrl = u => { try { return /^https?:$/.test(new URL(u).protocol); } catch { return false; } };
+
+// POST /audio-cache  { url, preferCached? } → { key } once the song is on disk
+app.post('/audio-cache', async (req, res) => {
+  const { url, preferCached } = req.body ?? {};
+  if (!isHttpUrl(url)) return res.status(400).json({ error: 'http(s) url required' });
+  try {
+    res.json(await audioCache.ensure(url, { preferCached: !!preferCached }));
+  } catch (e) {
+    res.status(502).json({ error: `Could not download audio: ${e.message}` });
+  }
+});
+
+// POST /audio-cache/status  { urls: [] } → { [url]: true|false }
+app.post('/audio-cache/status', (req, res) => {
+  const urls = Array.isArray(req.body?.urls) ? req.body.urls.filter(isHttpUrl) : [];
+  res.json(Object.fromEntries(urls.map(u => [u, audioCache.isCached(u)])));
+});
+
+// GET /audio-file/:key?t=<token> — sendFile handles Range, so seeking works
+app.get('/audio-file/:key', (req, res) => {
+  const file = audioCache.pathFor(req.params.key);
+  if (!file) return res.status(400).end();
+  res.sendFile(file, err => { if (err && !res.headersSent) res.status(404).end(); });
+});
+
 // Exported so main.js can report a port clash instead of crashing
 module.exports = app.listen(PORT, '127.0.0.1', () =>
   console.log(`Show Player bridge running on port ${PORT}`)

@@ -21,6 +21,8 @@ function start() {
   // request without it, so other pages on this PC can't drive it.
   const BRIDGE_TOKEN = require('crypto').randomBytes(24).toString('hex');
   process.env.BRIDGE_TOKEN = BRIDGE_TOKEN;
+  // Downloaded songs live with the app's data so they survive restarts and reboots
+  process.env.AUDIO_CACHE_DIR = path.join(app.getPath('userData'), 'audio-cache');
   const bridgeServer = require('./server');
 
   // Another program (usually an older Show Player) already holds the port

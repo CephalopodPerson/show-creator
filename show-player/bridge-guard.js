@@ -18,11 +18,13 @@ function isAllowedQlcExe(p) {
 /**
  * Every request must carry the per-launch token that main.js handed the page.
  * Other web pages on this machine can reach 127.0.0.1 but can't know it.
+ * An <audio> element can't send headers, so it may pass the token as ?t=.
  */
 function requireToken(token) {
   return (req, res, next) => {
     if (req.method === 'OPTIONS') return next();
-    if (!token || req.get('x-bridge-token') !== token) {
+    const sent = req.get('x-bridge-token') ?? req.query?.t;
+    if (!token || sent !== token) {
       return res.status(403).json({ error: 'bad_token' });
     }
     return next();

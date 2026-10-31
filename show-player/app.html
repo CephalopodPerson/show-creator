@@ -155,6 +155,7 @@ let playing     = null;  // { seqId, funcId, duration }
 let timerHandle = null;
 let showData    = {};    // name → full show json
 let expanded    = {};    // name → bool
+let saved       = {};    // audio url → 'yes' | 'saving' | 'failed'
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 document.getElementById('vpsUrl').value  = vpsUrl;
@@ -250,24 +251,93 @@ async function launchQlc(showName) {
 }
 
 // ── Load shows ────────────────────────────────────────────────────────────────
+// The last good copy of every list and show is kept, so with the internet down
+// the player still lists shows and plays the songs already saved on this PC.
+function remember(key, data) {
+  try { localStorage.setItem(`saved:${vpsUrl}:${key}`, JSON.stringify(data)); } catch {}
+}
+function recall(key) {
+  try { return JSON.parse(localStorage.getItem(`saved:${vpsUrl}:${key}`)); } catch { return null; }
+}
+
+async function getJson(url) {
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return r.json();
+}
+
 async function loadShows() {
   if (!vpsUrl) return;
   setStatus('Connecting to ' + vpsUrl + '…', '');
   try {
-    const shows = await fetch(`${vpsUrl}/api/shows`).then(r => r.json());
+    const shows = await getJson(`${vpsUrl}/api/shows`);
+    remember('shows', shows);
     renderShows(shows);
     setStatus('');
   } catch (e) {
-    setStatus('⚠ Could not connect to ' + vpsUrl + ' — check the URL and that Show Creator is running.', 'err');
-    renderShows([]);
+    const shows = recall('shows');
+    if (shows) {
+      renderShows(shows);
+      setStatus('⚠ Offline — showing saved shows. Songs already saved on this PC will still play.', 'warn');
+    } else {
+      setStatus('⚠ Could not connect to ' + vpsUrl + ' — check the URL and that Show Creator is running.', 'err');
+      renderShows([]);
+    }
   }
 }
 
 async function loadShowData(name) {
   if (showData[name]) return showData[name];
-  const d = await fetch(`${vpsUrl}/api/shows/${encodeURIComponent(name)}`).then(r => r.json());
+  let d;
+  try {
+    d = await getJson(`${vpsUrl}/api/shows/${encodeURIComponent(name)}`);
+    remember('show:' + name, d);
+  } catch (e) {
+    d = recall('show:' + name);
+    if (!d) throw e;
+  }
   showData[name] = d;
   return d;
+}
+
+// ── Local audio ───────────────────────────────────────────────────────────────
+function audioUrlOf(seq) {
+  return new URL(vpsUrl + seq.audioPath).href;
+}
+
+// Saves a song to this PC (or confirms it's already there). Resolves to the
+// local URL the <audio> element should play.
+async function saveSong(seq, { preferCached = false } = {}) {
+  const url = audioUrlOf(seq);
+  if (saved[url] !== 'yes') saved[url] = 'saving';
+  try {
+    const r = await bridge('/audio-cache', { method: 'POST', body: JSON.stringify({ url, preferCached }) });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error ?? `HTTP ${r.status}`);
+    saved[url] = 'yes';
+    return `http://127.0.0.1:${BRIDGE_PORT}/audio-file/${data.key}?t=${encodeURIComponent(BRIDGE_TOKEN)}`;
+  } catch (e) {
+    saved[url] = 'failed';
+    throw e;
+  }
+}
+
+// Download every song in a show in the background, one at a time, as soon as
+// the show is opened — so they're all on disk before anyone presses Play.
+async function saveShowAudio(name) {
+  const seqs = (showData[name]?.sequences ?? []).filter(s => s.audioPath);
+  try {
+    const urls = seqs.map(audioUrlOf);
+    const have = await bridge('/audio-cache/status', { method: 'POST', body: JSON.stringify({ urls }) }).then(r => r.json());
+    for (const u of urls) if (have[u] && !saved[u]) saved[u] = 'yes';
+  } catch {}
+  if (expanded[name]) renderSequences(name);
+
+  for (const seq of seqs) {
+    if (saved[audioUrlOf(seq)] === 'saving') continue;
+    await saveSong(seq).catch(() => {});
+    if (expanded[name]) renderSequences(name);
+  }
 }
 
 // ── Render ────────────────────────────────────────────────────────────────────
@@ -323,9 +393,11 @@ async function toggleShow(name) {
     expanded[name] = true;
     if (!showData[name]) {
       seqList.innerHTML = '<div class="seq-loading">Loading…</div>';
-      await loadShowData(name);
+      try { await loadShowData(name); }
+      catch { seqList.innerHTML = '<div class="seq-loading">Could not load this show — check the connection.</div>'; return; }
     }
     renderSequences(name);
+    saveShowAudio(name);
   }
 }
 
@@ -345,11 +417,15 @@ function renderSequences(name) {
     const row = el('div', 'seq-row' + (isPlaying ? ' playing' : ''));
     row.id = 'row-' + seq.id;
 
+    const savedState = hasAudio ? saved[audioUrlOf(seq)] : null;
     const flags = el('div', 'seq-flags');
     flags.append(
       hasOsc   ? el('span', 'flag flag-ok', 'QLC+')  : el('span', 'flag flag-warn', 'no QLC+ ID — export .qxw first'),
       hasAudio ? el('span', 'flag flag-ok', 'Audio') : el('span', 'flag flag-warn', 'no audio'),
     );
+    if (savedState === 'yes')    flags.append(el('span', 'flag flag-ok',   '✓ Saved on this PC'));
+    if (savedState === 'saving') flags.append(el('span', 'flag flag-warn', 'Downloading…'));
+    if (savedState === 'failed') flags.append(el('span', 'flag flag-warn', 'Not saved — will stream'));
     const info = el('div', 'seq-info');
     info.append(el('div', 'seq-name', seq.name), flags);
 
@@ -376,6 +452,17 @@ async function playSequence(showName, seqId) {
   const seq  = show?.sequences?.find(s => s.id === seqId);
   if (!seq) return;
 
+  // Get the song onto disk before the lights start, so they stay in sync. Only
+  // if that fails do we stream from the VPS, as the player used to.
+  let src;
+  try {
+    if (saved[audioUrlOf(seq)] !== 'yes') setStatus('Downloading song…', '');
+    src = await saveSong(seq, { preferCached: true });
+  } catch (e) {
+    src = audioUrlOf(seq);
+    setStatus('⚠ Could not save this song locally (' + e.message + ') — streaming it instead', 'warn');
+  }
+
   // Trigger QLC+ via local bridge — skip if no function ID exported yet
   if (seq.qlcFunctionId) {
     try {
@@ -396,9 +483,8 @@ async function playSequence(showName, seqId) {
     setStatus('▶ Audio only — no QLC+ ID (export .qxw to enable lights)', '');
   }
 
-  // Play audio from VPS
   const audio = document.getElementById('audio');
-  audio.src = vpsUrl + seq.audioPath;
+  audio.src = src;
   audio.currentTime = 0;
   audio.play().catch(e => setStatus('⚠ Audio: ' + e.message, 'warn'));
 
@@ -444,6 +530,10 @@ function stopPlayback(sendOsc) {
 }
 
 document.getElementById('audio').addEventListener('ended', () => stopPlayback(false));
+// Previously a failed stream just went silent with no explanation
+document.getElementById('audio').addEventListener('error', e => {
+  if (playing && e.target.getAttribute('src')) setStatus('⚠ Audio stopped: ' + (e.target.error?.message || 'playback error'), 'err');
+});
 
 function seekAudio(e) {
   const audio = document.getElementById('audio');
