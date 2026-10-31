@@ -1,6 +1,6 @@
 {
   "name": "show-player",
-  "version": "1.0.0",
+  "version": "1.2.0",
   "description": "Show Player — triggers QLC+ sequences and plays audio",
   "main": "main.js",
   "scripts": {
