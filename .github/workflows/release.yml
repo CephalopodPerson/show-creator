@@ -5,6 +5,9 @@ on:
     tags:
       - 'v*'   # triggers on v0.1.0, v1.2.3, etc.
 
+permissions:
+  contents: write   # the release step creates the GitHub release
+
 jobs:
   build-windows:
     runs-on: windows-latest
@@ -18,11 +21,13 @@ jobs:
       - name: Install dependencies
         run: npm run install:all
 
+      # electron-builder publishes on its own whenever it sees a tag, and fails
+      # without a token. Only build here; the last step publishes.
       - name: Build Show Creator installer
-        run: npm run build:win
+        run: npm run build:win -- --publish never
 
       - name: Build Show Player installer
-        run: npm run build:player:win
+        run: npm run build:player:win -- --publish never
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
