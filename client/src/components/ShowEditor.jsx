@@ -10,6 +10,12 @@ function cleanFileName(filename) {
   return filename.replace(/\.[^/.]+$/, '').replace(/^\d+[\s._-]+/, '').trim();
 }
 
+// Windows often reports an empty MIME type for FLAC/AIFF, so fall back to the extension.
+const AUDIO_EXT = /\.(mp3|wav|flac|aiff?|ogg|m4a|aac)$/i;
+function isAudioFile(file) {
+  return file.type.startsWith('audio/') || AUDIO_EXT.test(file.name);
+}
+
 function fmtDur(s) {
   if (!s) return null;
   const m = Math.floor(s / 60);
@@ -30,6 +36,7 @@ export default function ShowEditor({ showName, newCode, onExit }) {
   const [toast,     setToast]     = useState(null);
   const [copyFor,   setCopyFor]   = useState(null);
   const [allShows,  setAllShows]  = useState([]);
+  const [dragOver,  setDragOver]  = useState(false);
 
   const toastTimer = useRef(null);
   const pickerRef  = useRef(null);
@@ -118,6 +125,27 @@ export default function ShowEditor({ showName, newCode, onExit }) {
     }
     setUploading(false);
     if (pickerRef.current) pickerRef.current.value = '';
+  }
+
+  // Without these the browser opens a dropped file itself instead of handing it to us.
+  function onDragOver(e) {
+    if (!e.dataTransfer.types.includes('Files')) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+    setDragOver(true);
+  }
+  function onDragLeave(e) {
+    if (!e.currentTarget.contains(e.relatedTarget)) setDragOver(false);
+  }
+  function onDrop(e) {
+    if (!e.dataTransfer.types.includes('Files')) return;
+    e.preventDefault();
+    setDragOver(false);
+    const all   = Array.from(e.dataTransfer.files);
+    const audio = all.filter(isAudioFile);
+    if (!audio.length) { showToast('Those aren’t audio files — drop MP3, WAV, FLAC or AIFF'); return; }
+    if (audio.length < all.length) showToast(`Skipped ${all.length - audio.length} non-audio file(s)`, 'warn');
+    handleAudioFiles(audio);
   }
 
   async function commitRename(song) {
@@ -237,7 +265,7 @@ export default function ShowEditor({ showName, newCode, onExit }) {
   return (
     <div className="show-editor">
       {codeBars}
-    <div className="song-picker">
+    <div className="song-picker" onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={onDrop}>
       <div className="song-picker-head">
         <div>
           <h2>Songs</h2>
@@ -253,7 +281,7 @@ export default function ShowEditor({ showName, newCode, onExit }) {
           </label>
           <label className="btn-secondary file-btn">
             {uploading ? 'Uploading…' : '＋ Add songs'}
-            <input ref={pickerRef} type="file" accept="audio/*" multiple hidden onChange={e => handleAudioFiles(e.target.files)} />
+            <input ref={pickerRef} type="file" accept="audio/*,.mp3,.wav,.flac,.aif,.aiff,.ogg,.m4a,.aac" multiple hidden onChange={e => handleAudioFiles(e.target.files)} />
           </label>
           <button className="btn-primary" onClick={exportQxw} disabled={exporting || !show?.qxwPath}>
             {exporting ? 'Exporting…' : '↓ Export .qxw'}
@@ -332,11 +360,11 @@ export default function ShowEditor({ showName, newCode, onExit }) {
           </div>
         ))}
 
-        <label className="song-dropzone">
+        <label className={`song-dropzone${dragOver ? ' drag-over' : ''}`}>
           <span style={{ fontSize: 26 }}>♫</span>
           <span className="song-dropzone-title">Add songs</span>
           <span className="song-dropzone-sub">Drop in MP3 or WAV files — each one becomes a song</span>
-          <input type="file" accept="audio/*" multiple hidden onChange={e => handleAudioFiles(e.target.files)} />
+          <input type="file" accept="audio/*,.mp3,.wav,.flac,.aif,.aiff,.ogg,.m4a,.aac" multiple hidden onChange={e => handleAudioFiles(e.target.files)} />
         </label>
       </div>
 
