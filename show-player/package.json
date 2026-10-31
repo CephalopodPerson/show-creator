@@ -24,9 +24,7 @@
     },
     "nsis": {
       "oneClick":        false,
-      "allowToChangeInstallationDirectory": true,
-      "installerIcon":   "../build/icon.png",
-      "uninstallerIcon": "../build/icon.png"
+      "allowToChangeInstallationDirectory": true
     }
   },
   "devDependencies": {
